@@ -23,11 +23,20 @@ const SectorBrowser = ({ onAddInstrument }) => {
   }, []);
 
   if (loading) {
-    return <div className="loading-text">LOADING SECTOR DATA...</div>;
+    return <div style={{ color: 'var(--accent)', padding: '1rem', textAlign: 'center' }}>[ LOADING SECTOR DATA... ]</div>;
   }
 
   if (error) {
-    return <div style={{ color: 'var(--danger)' }}>ERROR: {error}</div>;
+    return (
+      <div style={{ color: 'var(--danger)', padding: '1rem', border: '1px dashed var(--danger)', marginTop: '0.5rem' }}>
+        <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>[ CONNECTION ERROR ]</div>
+        <div>{error}</div>
+      </div>
+    );
+  }
+
+  if (!sectors || Object.keys(sectors).length === 0) {
+    return <div style={{ color: 'var(--text-secondary)', padding: '1rem' }}>NO SECTORS AVAILABLE</div>;
   }
 
   return (
