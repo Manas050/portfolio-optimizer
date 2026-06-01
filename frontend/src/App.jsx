@@ -9,13 +9,13 @@ function App() {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [riskFreeRate, setRiskFreeRate] = useState(0.068);
 
   const handleOptimize = async (currentHoldings) => {
     setLoading(true);
     setError(null);
     try {
-      const validHoldings = currentHoldings.filter(h => h.units > 0);
-      const data = await analyzePortfolio(validHoldings, '1y');
+      const data = await analyzePortfolio(currentHoldings, '1y', riskFreeRate);
       setResults(data);
     } catch (err) {
       console.error(err);
@@ -46,6 +46,8 @@ function App() {
             setHoldings={setHoldings} 
             onOptimize={handleOptimize} 
             loading={loading} 
+            riskFreeRate={riskFreeRate}
+            setRiskFreeRate={setRiskFreeRate}
           />
         </div>
         

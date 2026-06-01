@@ -3,7 +3,7 @@ import { Trash2 } from 'lucide-react';
 import SectorBrowser from './SectorBrowser';
 import { fetchPrices } from '../services/api';
 
-const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading }) => {
+const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading, riskFreeRate, setRiskFreeRate }) => {
   const [prices, setPrices] = useState({});
 
   useEffect(() => {
@@ -125,18 +125,30 @@ const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading }) => {
             </div>
           </div>
           
-          <button 
-            className="btn" 
-            onClick={() => onOptimize(holdings)}
-            disabled={holdings.filter(h => h.units > 0).length < 2 || loading}
-          >
-            {loading ? 'RUNNING OPTIMIZER...' : 'EXECUTE [ OPTIMIZE ]'}
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>RISK-FREE RATE:</span>
+              <input 
+                type="number" 
+                step="0.001"
+                value={riskFreeRate} 
+                onChange={(e) => setRiskFreeRate(parseFloat(e.target.value) || 0)}
+                style={{ width: '80px', background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--accent)', padding: '0.25rem', fontFamily: 'JetBrains Mono' }}
+              />
+            </div>
+            <button 
+              className="btn" 
+              onClick={() => onOptimize(holdings)}
+              disabled={holdings.length < 2 || loading}
+            >
+              {loading ? 'RUNNING OPTIMIZER...' : 'EXECUTE [ OPTIMIZE ]'}
+            </button>
+          </div>
         </div>
         
-        {holdings.filter(h => h.units > 0).length < 2 && holdings.length > 0 && (
+        {holdings.length < 2 && holdings.length > 0 && (
           <div style={{ color: 'var(--danger)', fontSize: '0.75rem', marginTop: '0.5rem', textAlign: 'right' }}>
-            WARN: MIN 2 POSITIONS WITH &gt;0 UNITS REQUIRED FOR ANALYSIS
+            WARN: MIN 2 POSITIONS REQUIRED FOR ANALYSIS
           </div>
         )}
       </div>

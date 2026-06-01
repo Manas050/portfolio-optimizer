@@ -126,7 +126,14 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         )
 
     if total_value <= 0:
-        raise HTTPException(status_code=400, detail="Total portfolio value must be positive.")
+        # If no units provided, simulate a hypothetical 1,00,000 INR equal-weighted portfolio
+        simulated_total = 100000.0
+        allocation_per_asset = simulated_total / len(symbols)
+        total_value = 0.0
+        for h in holdings_detail:
+            h.value = allocation_per_asset
+            h.units = round(allocation_per_asset / prices[h.symbol], 2) if prices.get(h.symbol) else 0
+            total_value += h.value
 
     # Fill in weights
     for h in holdings_detail:
