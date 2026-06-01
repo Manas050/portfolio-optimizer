@@ -61,6 +61,7 @@ def optimize_max_sharpe(
     expected_returns: np.ndarray,
     cov_matrix: np.ndarray,
     risk_free_rate: float,
+    max_weight: float = 1.0,
 ) -> np.ndarray:
     """
     Find the portfolio weights that maximize the Sharpe ratio.
@@ -78,7 +79,7 @@ def optimize_max_sharpe(
         return -(ret - risk_free_rate) / vol
 
     constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
-    bounds = tuple((0.0, 1.0) for _ in range(n))
+    bounds = tuple((0.0, max_weight) for _ in range(n))
 
     result = minimize(
         neg_sharpe,
@@ -99,6 +100,7 @@ def optimize_max_sharpe(
 def optimize_min_volatility(
     expected_returns: np.ndarray,
     cov_matrix: np.ndarray,
+    max_weight: float = 1.0,
 ) -> np.ndarray:
     """
     Find the portfolio weights that minimize volatility.
@@ -111,7 +113,7 @@ def optimize_min_volatility(
         return np.sqrt(np.dot(w.T, np.dot(cov_matrix, w)))
 
     constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
-    bounds = tuple((0.0, 1.0) for _ in range(n))
+    bounds = tuple((0.0, max_weight) for _ in range(n))
 
     result = minimize(
         port_vol,
@@ -129,14 +131,16 @@ def optimize_min_volatility(
 
 
 def compute_efficient_frontier(
-    expected_returns: np.ndarray,
-    cov_matrix: np.ndarray,
+    expected_returns: np.ndarray, 
+    cov_matrix: np.ndarray, 
     risk_free_rate: float,
     symbols: list[str],
-    n_points: int = FRONTIER_POINTS,
+    n_points: int = 50,
+    max_weight: float = 1.0,
 ) -> list[dict]:
     """
-    Generate the efficient frontier by sweeping target returns from
+    Generate points on the efficient frontier.
+    We do this by sweeping target returns from 
     the minimum-variance portfolio return to the maximum individual asset return.
 
     Returns a list of dicts, each with: expected_return, volatility, weights.
@@ -144,7 +148,7 @@ def compute_efficient_frontier(
     n = len(expected_returns)
 
     # Find the min-volatility portfolio return as the lower bound
-    min_vol_weights = optimize_min_volatility(expected_returns, cov_matrix)
+    min_vol_weights = optimize_min_volatility(expected_returns, cov_matrix, max_weight)
     min_ret = portfolio_return(min_vol_weights, expected_returns)
     max_ret = float(np.max(expected_returns))
 
@@ -163,7 +167,7 @@ def compute_efficient_frontier(
             {"type": "eq", "fun": lambda w: np.sum(w) - 1.0},
             {"type": "eq", "fun": lambda w, t=target: np.dot(w, expected_returns) - t},
         ]
-        bounds = tuple((0.0, 1.0) for _ in range(n))
+        bounds = tuple((0.0, max_weight) for _ in range(n))
 
         result = minimize(
             lambda w: np.sqrt(np.dot(w.T, np.dot(cov_matrix, w))),

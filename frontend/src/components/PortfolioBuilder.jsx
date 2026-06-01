@@ -3,7 +3,7 @@ import { Trash2 } from 'lucide-react';
 import SectorBrowser from './SectorBrowser';
 import { fetchPrices } from '../services/api';
 
-const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading, riskFreeRate, setRiskFreeRate }) => {
+const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading, riskFreeRate, setRiskFreeRate, maxWeight, setMaxWeight }) => {
   const [prices, setPrices] = useState({});
 
   useEffect(() => {
@@ -126,19 +126,36 @@ const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading, riskFree
           </div>
           
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>RISK-FREE RATE:</span>
-              <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border-color)', paddingRight: '0.25rem' }}>
-                <input 
-                  type="number" 
-                  step="0.1"
-                  value={riskFreeRate * 100} 
-                  onChange={(e) => setRiskFreeRate((parseFloat(e.target.value) || 0) / 100)}
-                  style={{ width: '60px', background: 'transparent', border: 'none', color: 'var(--accent)', padding: '0.25rem', fontFamily: 'JetBrains Mono', outline: 'none' }}
-                />
-                <span style={{ color: 'var(--text-secondary)' }}>%</span>
+            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>MAX ALLOC:</span>
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border-color)', paddingRight: '0.25rem' }}>
+                  <input 
+                    type="number" 
+                    step="5"
+                    value={maxWeight * 100} 
+                    onChange={(e) => setMaxWeight((parseFloat(e.target.value) || 0) / 100)}
+                    style={{ width: '40px', background: 'transparent', border: 'none', color: 'var(--accent)', padding: '0.25rem', fontFamily: 'JetBrains Mono', outline: 'none' }}
+                  />
+                  <span style={{ color: 'var(--text-secondary)' }}>%</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>RISK-FREE:</span>
+                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border-color)', paddingRight: '0.25rem' }}>
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    value={riskFreeRate * 100} 
+                    onChange={(e) => setRiskFreeRate((parseFloat(e.target.value) || 0) / 100)}
+                    style={{ width: '45px', background: 'transparent', border: 'none', color: 'var(--accent)', padding: '0.25rem', fontFamily: 'JetBrains Mono', outline: 'none' }}
+                  />
+                  <span style={{ color: 'var(--text-secondary)' }}>%</span>
+                </div>
               </div>
             </div>
+            
             <button 
               className="btn" 
               onClick={() => onOptimize(holdings)}

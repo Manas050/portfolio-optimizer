@@ -172,13 +172,17 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         for s in valid_symbols
     ])
 
+    max_weight = request.max_weight if request.max_weight is not None else 1.0
+    if max_weight < 1.0 / len(valid_symbols):
+        max_weight = 1.0 # fallback if impossible
+
     # ── Step 3: Optimise ────────────────────────────────────────────
     current_metrics = compute_portfolio_metrics(
         current_weights, expected_returns, cov_matrix, risk_free_rate, valid_symbols
     )
     current_metrics["units"] = {s: units_map.get(s, 0.0) for s in valid_symbols}
 
-    max_sharpe_weights = optimize_max_sharpe(expected_returns, cov_matrix, risk_free_rate)
+    max_sharpe_weights = optimize_max_sharpe(expected_returns, cov_matrix, risk_free_rate, max_weight)
     max_sharpe_metrics = compute_portfolio_metrics(
         max_sharpe_weights, expected_returns, cov_matrix, risk_free_rate, valid_symbols
     )
@@ -187,7 +191,7 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         for s in valid_symbols
     }
 
-    min_vol_weights = optimize_min_volatility(expected_returns, cov_matrix)
+    min_vol_weights = optimize_min_volatility(expected_returns, cov_matrix, max_weight)
     min_vol_metrics = compute_portfolio_metrics(
         min_vol_weights, expected_returns, cov_matrix, risk_free_rate, valid_symbols
     )
@@ -198,7 +202,7 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
 
     # ── Step 4: Efficient frontier ──────────────────────────────────
     frontier = compute_efficient_frontier(
-        expected_returns, cov_matrix, risk_free_rate, valid_symbols
+        expected_returns, cov_matrix, n_points=50, max_weight=max_weight
     )
 
     # ── Step 5: Return response ─────────────────────────────────────

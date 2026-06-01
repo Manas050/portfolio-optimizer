@@ -10,12 +10,13 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [riskFreeRate, setRiskFreeRate] = useState(0.068);
+  const [maxWeight, setMaxWeight] = useState(1.0);
 
   const handleOptimize = async (currentHoldings) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await analyzePortfolio(currentHoldings, '1y', riskFreeRate);
+      const data = await analyzePortfolio(currentHoldings, '1y', riskFreeRate, maxWeight);
       setResults(data);
     } catch (err) {
       console.error(err);
@@ -48,6 +49,8 @@ function App() {
             loading={loading} 
             riskFreeRate={riskFreeRate}
             setRiskFreeRate={setRiskFreeRate}
+            maxWeight={maxWeight}
+            setMaxWeight={setMaxWeight}
           />
         </div>
         

@@ -38,7 +38,11 @@ class AnalyzeRequest(BaseModel):
     )
     risk_free_rate: Optional[float] = Field(
         default=None,
-        description="Annual risk-free rate override (default: India 10Y yield ~0.07)"
+        description="Override default risk-free rate (decimal, e.g., 0.068 for 6.8%)"
+    )
+    max_weight: Optional[float] = Field(
+        default=1.0,
+        description="Maximum allowed weight for any single asset (e.g. 0.4 for 40%)"
     )
 
 

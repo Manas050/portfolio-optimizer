@@ -67,7 +67,7 @@ export async function fetchPrices(symbols) {
  * @param {string} lookback - Period string (e.g., "1y", "6mo")
  * @param {number|null} riskFreeRate - Override risk-free rate
  */
-export async function analyzePortfolio(holdings, lookback = '1y', riskFreeRate = null) {
+export async function analyzePortfolio(holdings, lookback = '1y', riskFreeRate = null, maxWeight = 1.0) {
   const body = {
     holdings: holdings.map(h => {
       const parsed = parseFloat(h.units);
@@ -77,6 +77,9 @@ export async function analyzePortfolio(holdings, lookback = '1y', riskFreeRate =
   };
   if (riskFreeRate !== null) {
     body.risk_free_rate = riskFreeRate;
+  }
+  if (maxWeight !== null) {
+    body.max_weight = maxWeight;
   }
   return apiFetch(`${API_BASE}/portfolio/analyze`, {
     method: 'POST',
