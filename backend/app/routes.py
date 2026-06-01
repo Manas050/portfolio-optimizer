@@ -91,6 +91,8 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
     units_map = {h.symbol: h.units for h in request.holdings}
 
     risk_free_rate = request.risk_free_rate if request.risk_free_rate is not None else RISK_FREE_RATE
+    if risk_free_rate > 1.0:
+        risk_free_rate = risk_free_rate / 100.0
     lookback = request.lookback or DEFAULT_LOOKBACK_PERIOD
 
     # ── Step 1: Current prices & values ─────────────────────────────

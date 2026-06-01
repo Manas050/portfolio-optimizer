@@ -69,7 +69,10 @@ export async function fetchPrices(symbols) {
  */
 export async function analyzePortfolio(holdings, lookback = '1y', riskFreeRate = null) {
   const body = {
-    holdings: holdings.map(h => ({ symbol: h.symbol, units: parseFloat(h.units) })),
+    holdings: holdings.map(h => {
+      const parsed = parseFloat(h.units);
+      return { symbol: h.symbol, units: isNaN(parsed) ? 0 : parsed };
+    }),
     lookback,
   };
   if (riskFreeRate !== null) {

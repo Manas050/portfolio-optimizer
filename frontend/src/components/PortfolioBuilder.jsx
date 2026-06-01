@@ -128,13 +128,16 @@ const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading, riskFree
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
               <span style={{ color: 'var(--text-secondary)' }}>RISK-FREE RATE:</span>
-              <input 
-                type="number" 
-                step="0.001"
-                value={riskFreeRate} 
-                onChange={(e) => setRiskFreeRate(parseFloat(e.target.value) || 0)}
-                style={{ width: '80px', background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--accent)', padding: '0.25rem', fontFamily: 'JetBrains Mono' }}
-              />
+              <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border-color)', paddingRight: '0.25rem' }}>
+                <input 
+                  type="number" 
+                  step="0.1"
+                  value={riskFreeRate * 100} 
+                  onChange={(e) => setRiskFreeRate((parseFloat(e.target.value) || 0) / 100)}
+                  style={{ width: '60px', background: 'transparent', border: 'none', color: 'var(--accent)', padding: '0.25rem', fontFamily: 'JetBrains Mono', outline: 'none' }}
+                />
+                <span style={{ color: 'var(--text-secondary)' }}>%</span>
+              </div>
             </div>
             <button 
               className="btn" 
