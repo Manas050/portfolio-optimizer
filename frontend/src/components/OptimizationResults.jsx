@@ -72,6 +72,12 @@ const OptimizationResults = ({ results }) => {
             })}
           </tbody>
         </table>
+        
+        {Object.keys(current_portfolio.weights).length <= 2 && (
+          <div style={{ marginTop: '1rem', padding: '0.5rem', border: '1px dashed var(--danger)', color: 'var(--danger)', fontSize: '0.8rem' }}>
+            WARN: Optimizing with 2 or fewer assets typically yields corner solutions (100% allocation to one asset). Consider adding more diverse sectors for a balanced frontier.
+          </div>
+        )}
       </div>
     </div>
   );

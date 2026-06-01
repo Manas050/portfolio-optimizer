@@ -50,10 +50,10 @@ def compute_portfolio_metrics(
     sharpe = (ret - risk_free_rate) / vol if vol > 0 else 0.0
 
     return {
-        "expected_return": round(ret, 6),
-        "volatility": round(vol, 6),
+        "expected_return": round(ret, 4),
+        "volatility": round(vol, 4),
         "sharpe_ratio": round(sharpe, 4),
-        "weights": {sym: round(float(w), 6) for sym, w in zip(symbols, weights)},
+        "weights": {sym: round(float(w), 4) for sym, w in zip(symbols, weights)},
     }
 
 
@@ -179,10 +179,10 @@ def compute_efficient_frontier(
             vol = portfolio_volatility(result.x, cov_matrix)
             ret = portfolio_return(result.x, expected_returns)
             frontier.append({
-                "expected_return": round(ret, 6),
-                "volatility": round(vol, 6),
+                "expected_return": round(ret, 4),
+                "volatility": round(vol, 4),
                 "weights": {
-                    sym: round(float(w), 6)
+                    sym: round(float(w), 4)
                     for sym, w in zip(symbols, result.x)
                 },
             })

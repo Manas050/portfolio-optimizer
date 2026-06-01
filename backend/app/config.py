@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Risk-free rate for Sharpe Ratio (India 10Y government bond yield ~7%)
-RISK_FREE_RATE = float(os.getenv("RISK_FREE_RATE", "0.07"))
+# Risk-free rate for Sharpe Ratio (India 91-day T-bill rate ~6.8%)
+RISK_FREE_RATE = float(os.getenv("RISK_FREE_RATE", "0.068"))
 
 # Default lookback period for historical returns (yfinance period strings)
 DEFAULT_LOOKBACK_PERIOD = os.getenv("DEFAULT_LOOKBACK_PERIOD", "1y")

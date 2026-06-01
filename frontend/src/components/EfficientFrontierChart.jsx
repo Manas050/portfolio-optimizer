@@ -91,6 +91,7 @@ const EfficientFrontierChart = ({ results }) => {
               stroke="var(--text-secondary)"
               domain={['dataMin - 1', 'dataMax + 1']}
               tick={{ fill: 'var(--text-secondary)', fontSize: 12, fontFamily: 'JetBrains Mono' }}
+              tickFormatter={(val) => val.toFixed(2)}
               label={{ value: 'VOLATILITY (RISK)', position: 'insideBottom', offset: -10, fill: 'var(--border-color)', fontSize: 12, fontFamily: 'JetBrains Mono' }}
             />
             <YAxis 
@@ -101,6 +102,7 @@ const EfficientFrontierChart = ({ results }) => {
               stroke="var(--text-secondary)"
               domain={['dataMin - 1', 'dataMax + 1']}
               tick={{ fill: 'var(--text-secondary)', fontSize: 12, fontFamily: 'JetBrains Mono' }}
+              tickFormatter={(val) => val.toFixed(2)}
               label={{ value: 'EXPECTED RETURN', angle: -90, position: 'insideLeft', offset: 0, fill: 'var(--border-color)', fontSize: 12, fontFamily: 'JetBrains Mono' }}
             />
             <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
@@ -126,7 +128,7 @@ const EfficientFrontierChart = ({ results }) => {
       <div style={{ display: 'flex', gap: '1.5rem', justifyContent: 'center', marginTop: '1rem', fontSize: '0.8rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <div style={{ width: '12px', height: '12px', backgroundColor: 'var(--text-secondary)', borderRadius: '50%' }}></div>
-          FRONTIER
+          FRONTIER (COMBINATIONS)
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <div style={{ width: '12px', height: '12px', backgroundColor: 'var(--danger)', transform: 'rotate(45deg)' }}></div>
