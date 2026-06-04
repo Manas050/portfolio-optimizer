@@ -60,9 +60,9 @@ const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading, riskFree
           <span>{holdings.length} POSITIONS</span>
         </div>
 
-        <div style={{ marginBottom: '1rem', minHeight: '150px' }}>
+        <div style={{ marginBottom: '1rem', minHeight: '100px' }}>
           {holdings.length === 0 ? (
-            <div style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+            <div style={{ color: 'var(--text-secondary)', fontStyle: 'italic', fontSize: '0.8rem' }}>
               &gt; NO POSITIONS FOUND. SELECT FROM SECTORS ABOVE.
             </div>
           ) : (
@@ -73,43 +73,49 @@ const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading, riskFree
               const weight = totalValue > 0 ? (value / totalValue) * 100 : 0;
 
               return (
-                <div key={h.symbol} className="asset-item">
-                  <div style={{ flex: 1 }}>
-                    <div style={{ color: 'var(--accent)', fontWeight: 'bold' }}>{h.symbol.replace('.NS', '')}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{h.name}</div>
-                  </div>
-                  
-                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                    <div className="input-group" style={{ marginBottom: 0, width: '100px' }}>
-                      <input 
-                        type="number" 
-                        placeholder="UNITS" 
-                        value={h.units}
-                        onChange={(e) => updateUnits(h.symbol, e.target.value)}
-                        min="0"
-                        step="1"
-                        style={{ padding: '0.25rem', textAlign: 'right' }}
-                      />
+                <div key={h.symbol} style={{ 
+                  borderBottom: '1px dashed var(--text-secondary)', 
+                  padding: '0.4rem 0',
+                }}>
+                  {/* Row 1: Symbol + Units Input + Weight + Delete */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div style={{ color: 'var(--accent)', fontWeight: 'bold', fontSize: '0.85rem', minWidth: '90px' }}>
+                      {h.symbol.replace('.NS', '')}
                     </div>
-                    
-                    <div style={{ width: '120px', textAlign: 'right', fontSize: '0.85rem' }}>
-                      <div>{price > 0 ? `@ ${price.toFixed(2)} INR` : 'LDG...'}</div>
-                      <div style={{ color: 'var(--success)' }}>
-                        {value > 0 ? `Val: ${value.toLocaleString('en-IN', {maximumFractionDigits:0})}` : ''}
-                      </div>
+                    <input 
+                      type="number" 
+                      placeholder="QTY" 
+                      value={h.units}
+                      onChange={(e) => updateUnits(h.symbol, e.target.value)}
+                      min="0"
+                      step="1"
+                      style={{ 
+                        width: '60px', padding: '0.2rem 0.3rem', textAlign: 'right', 
+                        fontSize: '0.8rem', border: '1px solid var(--border-color)',
+                        background: '#000', color: 'var(--text-primary)',
+                        fontFamily: 'JetBrains Mono',
+                      }}
+                    />
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', flex: 1, textAlign: 'right' }}>
+                      {price > 0 ? `@ ${price.toFixed(2)} INR` : 'LDG...'}
+                      {value > 0 && <span style={{ color: 'var(--success)', marginLeft: '0.5rem' }}>
+                        Val: {value.toLocaleString('en-IN', {maximumFractionDigits:0})}
+                      </span>}
                     </div>
-                    
-                    <div style={{ width: '60px', textAlign: 'right', color: 'var(--accent)' }}>
-                      {weight > 0 ? `${weight.toFixed(1)}%` : '0.0%'}
+                    <div style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: 'bold', minWidth: '45px', textAlign: 'right' }}>
+                      {weight.toFixed(1)}%
                     </div>
-
                     <button 
                       className="btn btn-danger" 
-                      style={{ padding: '0.25rem 0.5rem' }}
+                      style={{ padding: '0.15rem 0.3rem', fontSize: '0.7rem', lineHeight: 1 }}
                       onClick={() => removeHolding(h.symbol)}
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={12} />
                     </button>
+                  </div>
+                  {/* Row 2: Full name */}
+                  <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginTop: '0.15rem', paddingLeft: '0' }}>
+                    {h.name}
                   </div>
                 </div>
               );
@@ -117,57 +123,56 @@ const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading, riskFree
           )}
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-          <div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>EST. PORTFOLIO VALUE</div>
-            <div style={{ fontSize: '1.25rem', color: 'var(--accent)', fontWeight: 'bold' }}>
+        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
+          {/* Portfolio Value */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem' }}>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>EST. PORTFOLIO VALUE</span>
+            <span style={{ fontSize: '1.1rem', color: 'var(--accent)', fontWeight: 'bold' }}>
               INR {totalValue.toLocaleString('en-IN', {maximumFractionDigits: 2})}
-            </div>
+            </span>
           </div>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem' }}>
-            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>MAX ALLOC:</span>
-                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border-color)', paddingRight: '0.25rem' }}>
-                  <input 
-                    type="number" 
-                    step="5"
-                    value={maxWeight * 100} 
-                    onChange={(e) => setMaxWeight((parseFloat(e.target.value) || 0) / 100)}
-                    style={{ width: '40px', background: 'transparent', border: 'none', color: 'var(--accent)', padding: '0.25rem', fontFamily: 'JetBrains Mono', outline: 'none' }}
-                  />
-                  <span style={{ color: 'var(--text-secondary)' }}>%</span>
-                </div>
-              </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>RISK-FREE:</span>
-                <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border-color)', paddingRight: '0.25rem' }}>
-                  <input 
-                    type="number" 
-                    step="0.1"
-                    value={riskFreeRate * 100} 
-                    onChange={(e) => setRiskFreeRate((parseFloat(e.target.value) || 0) / 100)}
-                    style={{ width: '45px', background: 'transparent', border: 'none', color: 'var(--accent)', padding: '0.25rem', fontFamily: 'JetBrains Mono', outline: 'none' }}
-                  />
-                  <span style={{ color: 'var(--text-secondary)' }}>%</span>
-                </div>
+          {/* Params Row */}
+          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.5rem', fontSize: '0.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>MAX ALLOC:</span>
+              <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border-color)', paddingRight: '0.2rem' }}>
+                <input 
+                  type="number" step="5"
+                  value={maxWeight * 100} 
+                  onChange={(e) => setMaxWeight((parseFloat(e.target.value) || 0) / 100)}
+                  style={{ width: '36px', background: 'transparent', border: 'none', color: 'var(--accent)', padding: '0.2rem', fontFamily: 'JetBrains Mono', outline: 'none', fontSize: '0.75rem' }}
+                />
+                <span style={{ color: 'var(--text-secondary)' }}>%</span>
               </div>
             </div>
-            
-            <button 
-              className="btn" 
-              onClick={() => onOptimize(holdings)}
-              disabled={holdings.length < 2 || loading}
-            >
-              {loading ? 'RUNNING OPTIMIZER...' : 'EXECUTE [ OPTIMIZE ]'}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>RISK-FREE:</span>
+              <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border-color)', paddingRight: '0.2rem' }}>
+                <input 
+                  type="number" step="0.1"
+                  value={riskFreeRate * 100} 
+                  onChange={(e) => setRiskFreeRate((parseFloat(e.target.value) || 0) / 100)}
+                  style={{ width: '36px', background: 'transparent', border: 'none', color: 'var(--accent)', padding: '0.2rem', fontFamily: 'JetBrains Mono', outline: 'none', fontSize: '0.75rem' }}
+                />
+                <span style={{ color: 'var(--text-secondary)' }}>%</span>
+              </div>
+            </div>
           </div>
+
+          {/* Execute Button */}
+          <button 
+            className="btn" 
+            style={{ width: '100%' }}
+            onClick={() => onOptimize(holdings)}
+            disabled={holdings.length < 2 || loading}
+          >
+            {loading ? 'RUNNING OPTIMIZER...' : 'EXECUTE [ OPTIMIZE ]'}
+          </button>
         </div>
         
         {holdings.length < 2 && holdings.length > 0 && (
-          <div style={{ color: 'var(--danger)', fontSize: '0.75rem', marginTop: '0.5rem', textAlign: 'right' }}>
+          <div style={{ color: 'var(--danger)', fontSize: '0.7rem', marginTop: '0.5rem' }}>
             WARN: MIN 2 POSITIONS REQUIRED FOR ANALYSIS
           </div>
         )}

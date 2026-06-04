@@ -77,8 +77,17 @@ header p {
 /* Layout */
 .dashboard-grid {
   display: grid;
-  grid-template-columns: 350px 1fr;
+  grid-template-columns: minmax(320px, 420px) 1fr;
   gap: 1rem;
+}
+
+.left-panel {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.left-panel .glass-panel {
+  overflow: hidden;
 }
 
 @media (max-width: 900px) {
