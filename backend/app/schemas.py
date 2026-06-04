@@ -115,6 +115,10 @@ class AnalyzeResponse(BaseModel):
     # Config used
     lookback: str
     risk_free_rate: float
+    effective_max_weight: float = 1.0
+
+    # Warnings
+    warnings: list[str] = []
 
 
 # ── Price Request ───────────────────────────────────────────────────

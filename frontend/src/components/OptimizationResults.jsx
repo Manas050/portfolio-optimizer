@@ -3,12 +3,31 @@ import React from 'react';
 const OptimizationResults = ({ results }) => {
   if (!results) return null;
 
-  const { current_portfolio, optimal_sharpe, min_volatility, total_value } = results;
+  const { current_portfolio, optimal_sharpe, min_volatility, total_value, warnings, effective_max_weight, risk_free_rate } = results;
 
   return (
     <div className="glass-panel">
       <div className="panel-header">[ ANLYS: PORTFOLIO METRICS ]</div>
       
+      {/* Warnings Banner */}
+      {warnings && warnings.length > 0 && (
+        <div style={{ marginBottom: '1rem' }}>
+          {warnings.map((w, i) => (
+            <div key={i} style={{ 
+              padding: '0.5rem 0.75rem', 
+              border: '1px solid var(--danger)', 
+              background: 'rgba(255,0,0,0.08)',
+              color: 'var(--danger)', 
+              fontSize: '0.75rem', 
+              marginBottom: '0.25rem',
+              lineHeight: 1.4,
+            }}>
+              {w}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="results-grid">
         <div className="metric-card">
           <div className="metric-label">TOTAL VALUE</div>
@@ -34,6 +53,13 @@ const OptimizationResults = ({ results }) => {
             {optimal_sharpe.sharpe_ratio.toFixed(3)}
           </div>
         </div>
+      </div>
+
+      {/* Config info */}
+      <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginTop: '0.5rem', display: 'flex', gap: '1rem' }}>
+        <span>Rf: {((risk_free_rate || 0) * 100).toFixed(1)}%</span>
+        <span>MAX ALLOC: {((effective_max_weight || 1) * 100).toFixed(0)}%</span>
+        <span>LOOKBACK: {results.lookback}</span>
       </div>
 
       <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
@@ -72,12 +98,6 @@ const OptimizationResults = ({ results }) => {
             })}
           </tbody>
         </table>
-        
-        {Object.keys(current_portfolio.weights).length <= 2 && (
-          <div style={{ marginTop: '1rem', padding: '0.5rem', border: '1px dashed var(--danger)', color: 'var(--danger)', fontSize: '0.8rem' }}>
-            WARN: Optimizing with 2 or fewer assets typically yields corner solutions (100% allocation to one asset). Consider adding more diverse sectors for a balanced frontier.
-          </div>
-        )}
       </div>
     </div>
   );

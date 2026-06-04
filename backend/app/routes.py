@@ -174,8 +174,11 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
     ])
 
     max_weight = request.max_weight if request.max_weight is not None else 1.0
-    if max_weight < 1.0 / len(valid_symbols):
-        max_weight = 1.0 # fallback if impossible
+    n_assets = len(valid_symbols)
+    min_feasible_weight = 1.0 / n_assets
+    if max_weight < min_feasible_weight:
+        # Can't sum to 1.0 if every asset is capped below 1/n, so clamp to equal-weight
+        max_weight = min_feasible_weight
 
     # ── Step 3: Optimise ────────────────────────────────────────────
     current_metrics = compute_portfolio_metrics(
@@ -214,7 +217,48 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         n_portfolios=2000, max_weight=max_weight,
     )
 
-    # ── Step 6: Return response ─────────────────────────────────────
+    # ── Step 6: Generate warnings ───────────────────────────────────
+    warnings: list[str] = []
+
+    # Check if all individual asset Sharpe ratios are negative
+    all_negative = all(
+        (er - risk_free_rate) / np.sqrt(cov_matrix[i][i]) < 0
+        for i, er in enumerate(expected_returns)
+        if np.sqrt(cov_matrix[i][i]) > 1e-10
+    )
+    if all_negative:
+        warnings.append(
+            f"⚠ ALL {n_assets} ASSETS UNDERPERFORM THE RISK-FREE RATE ({risk_free_rate*100:.1f}%). "
+            "No portfolio combination can achieve a positive Sharpe ratio. "
+            "The optimizer picks the 'least bad' allocation. Consider diversifying into "
+            "assets from other sectors or adjusting the lookback period."
+        )
+
+    if max_sharpe_metrics["sharpe_ratio"] < 0:
+        warnings.append(
+            f"⚠ OPTIMAL SHARPE IS NEGATIVE ({max_sharpe_metrics['sharpe_ratio']:.3f}). "
+            "The recommended portfolio still loses vs. the risk-free rate. "
+            "This is not a bug — it's the best allocation given these assets' recent performance."
+        )
+
+    # Check for corner solution
+    max_single_weight = max(max_sharpe_metrics["weights"].values())
+    if max_single_weight > 0.95 and n_assets >= 3:
+        dominant_asset = max(max_sharpe_metrics["weights"], key=max_sharpe_metrics["weights"].get)
+        warnings.append(
+            f"⚠ CORNER SOLUTION: {dominant_asset.replace('.NS','')} at {max_single_weight*100:.0f}% allocation. "
+            f"Lower the MAX ALLOC constraint (currently {max_weight*100:.0f}%) to force diversification."
+        )
+
+    # Warn if max_weight was clamped
+    requested_max = request.max_weight if request.max_weight is not None else 1.0
+    if requested_max < min_feasible_weight:
+        warnings.append(
+            f"⚠ MAX ALLOC {requested_max*100:.0f}% is infeasible with {n_assets} assets "
+            f"(minimum is {min_feasible_weight*100:.1f}%). Clamped to {max_weight*100:.1f}%."
+        )
+
+    # ── Step 7: Return response ─────────────────────────────────────
     return AnalyzeResponse(
         holdings=holdings_detail,
         total_value=round(total_value, 2),
@@ -225,4 +269,6 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         monte_carlo=monte_carlo,
         lookback=lookback,
         risk_free_rate=risk_free_rate,
+        effective_max_weight=max_weight,
+        warnings=warnings,
     )
