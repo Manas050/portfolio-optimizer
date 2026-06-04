@@ -21,6 +21,7 @@ from app.optimizer import (
     optimize_max_sharpe,
     optimize_min_volatility,
     compute_efficient_frontier,
+    generate_monte_carlo_portfolios,
 )
 
 import numpy as np
@@ -202,10 +203,18 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
 
     # ── Step 4: Efficient frontier ──────────────────────────────────
     frontier = compute_efficient_frontier(
-        expected_returns, cov_matrix, n_points=50, max_weight=max_weight
+        expected_returns, cov_matrix, valid_symbols,
+        n_points=50, max_weight=max_weight,
     )
 
-    # ── Step 5: Return response ─────────────────────────────────────
+    # ── Step 5: Monte Carlo simulation ──────────────────────────────
+    monte_carlo = generate_monte_carlo_portfolios(
+        expected_returns, cov_matrix, valid_symbols,
+        risk_free_rate=risk_free_rate,
+        n_portfolios=2000, max_weight=max_weight,
+    )
+
+    # ── Step 6: Return response ─────────────────────────────────────
     return AnalyzeResponse(
         holdings=holdings_detail,
         total_value=round(total_value, 2),
@@ -213,6 +222,7 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         optimal_sharpe=max_sharpe_metrics,
         min_volatility=min_vol_metrics,
         efficient_frontier=frontier,
+        monte_carlo=monte_carlo,
         lookback=lookback,
         risk_free_rate=risk_free_rate,
     )

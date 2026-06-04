@@ -21,7 +21,7 @@ class InstrumentInfo(BaseModel):
 class PortfolioHolding(BaseModel):
     """A user's holding: the instrument and how many units they own."""
     symbol: str = Field(..., description="Yahoo Finance ticker symbol")
-    units: float = Field(..., gt=0, description="Number of units/shares held")
+    units: float = Field(..., ge=0, description="Number of units/shares held (0 for hypothetical)")
 
 
 # ── Analysis Request ────────────────────────────────────────────────
@@ -66,6 +66,13 @@ class EfficientFrontierPoint(BaseModel):
     weights: dict[str, float]
 
 
+class MonteCarloPoint(BaseModel):
+    """A single random portfolio from Monte Carlo simulation."""
+    expected_return: float
+    volatility: float
+    sharpe_ratio: float
+
+
 # ── Price Info ──────────────────────────────────────────────────────
 
 class PriceInfo(BaseModel):
@@ -101,6 +108,9 @@ class AnalyzeResponse(BaseModel):
 
     # Efficient frontier curve
     efficient_frontier: list[EfficientFrontierPoint]
+
+    # Monte Carlo random portfolios
+    monte_carlo: list[MonteCarloPoint] = []
 
     # Config used
     lookback: str
