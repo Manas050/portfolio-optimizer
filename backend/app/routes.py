@@ -146,7 +146,7 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
 
     # ── Step 2: Historical data ─────────────────────────────────────
     try:
-        expected_returns, cov_matrix, valid_symbols = get_historical_data(symbols, lookback)
+        expected_returns, cov_matrix, valid_symbols, hist_prices = get_historical_data(symbols, lookback)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -165,6 +165,21 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         total_value = sum(h.value for h in holdings_detail)
         for h in holdings_detail:
             h.weight = round(h.value / total_value, 6) if total_value > 0 else 0.0
+
+    # Use historical terminal prices for consistency between weights and frontier
+    # (avoids stale-cache drift between live prices and historical data)
+    consistent_prices = {s: hist_prices.get(s, prices.get(s, 1.0)) for s in valid_symbols}
+
+    # Recompute holdings values using consistent prices
+    for h in holdings_detail:
+        if h.symbol in consistent_prices:
+            h.price = consistent_prices[h.symbol]
+            h.value = round(h.units * h.price, 2)
+    total_value = sum(h.value for h in holdings_detail)
+    if total_value <= 0:
+        total_value = 1.0  # Prevent division by zero for hypothetical portfolios
+    for h in holdings_detail:
+        h.weight = round(h.value / total_value, 6)
 
     # Always build current_weights in valid_symbols order
     weight_map = {h.symbol: h.value for h in holdings_detail}
@@ -191,7 +206,7 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         max_sharpe_weights, expected_returns, cov_matrix, risk_free_rate, valid_symbols
     )
     max_sharpe_metrics["units"] = {
-        s: round((max_sharpe_metrics["weights"][s] * total_value) / prices[s]) if prices[s] > 0 else 0
+        s: round((max_sharpe_metrics["weights"][s] * total_value) / consistent_prices[s]) if consistent_prices[s] > 0 else 0
         for s in valid_symbols
     }
 
@@ -200,7 +215,7 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         min_vol_weights, expected_returns, cov_matrix, risk_free_rate, valid_symbols
     )
     min_vol_metrics["units"] = {
-        s: round((min_vol_metrics["weights"][s] * total_value) / prices[s]) if prices[s] > 0 else 0
+        s: round((min_vol_metrics["weights"][s] * total_value) / consistent_prices[s]) if consistent_prices[s] > 0 else 0
         for s in valid_symbols
     }
 

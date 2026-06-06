@@ -31,7 +31,7 @@ def portfolio_sharpe(
     """Calculate the Sharpe ratio of a portfolio."""
     ret = portfolio_return(weights, expected_returns)
     vol = portfolio_volatility(weights, cov_matrix)
-    if vol < 1e-10:
+    if vol < 1e-8:
         return 0.0
     return float((ret - risk_free_rate) / vol)
 
@@ -50,7 +50,7 @@ def compute_portfolio_metrics(
     """
     ret = portfolio_return(weights, expected_returns)
     vol = portfolio_volatility(weights, cov_matrix)
-    sharpe = (ret - risk_free_rate) / vol if vol > 1e-10 else 0.0
+    sharpe = (ret - risk_free_rate) / vol if vol > 1e-8 else 0.0
 
     return {
         "expected_return": round(ret, 6),
@@ -70,26 +70,35 @@ def optimize_max_sharpe(
     Find the portfolio weights that maximize the Sharpe ratio.
     Long-only constraint (weights >= 0), weights sum to 1.
     Uses multiple random starting points to avoid local minima.
+
+    When all assets underperform Rf (all Sharpe < 0), the objective surface
+    is inverted: the "best" negative Sharpe is the one closest to zero,
+    which is the minimum-volatility corner. The optimizer handles this
+    correctly because minimizing -(Rp - Rf)/σp when the numerator is always
+    negative means finding the weight vector where the ratio is least negative.
     """
     n = len(expected_returns)
-    bounds = tuple((0.0, min(max_weight, 1.0)) for _ in range(n))
+    capped = min(max_weight, 1.0)
+    bounds = tuple((0.0, capped) for _ in range(n))
     constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
 
     def neg_sharpe(w):
         ret = np.dot(w, expected_returns)
         vol = np.sqrt(max(0.0, np.dot(w.T, np.dot(cov_matrix, w))))
-        if vol < 1e-10:
+        # Guard: if vol → 0, Sharpe → ±∞ which causes numerical instability.
+        # Return 0.0 so the optimizer doesn't chase degenerate zero-vol solutions.
+        if vol < 1e-8:
             return 0.0
         return -(ret - risk_free_rate) / vol
 
     best_result = None
     best_val = np.inf
 
-    # Try multiple starting points
+    # Try multiple starting points to escape local minima
     starting_points = [np.ones(n) / n]  # Equal weight
     for _ in range(5):
         rw = np.random.dirichlet(np.ones(n))
-        rw = np.clip(rw, 0.0, max_weight)
+        rw = np.clip(rw, 0.0, capped)
         rw /= rw.sum()
         starting_points.append(rw)
 
@@ -123,12 +132,13 @@ def optimize_min_volatility(
     """
     n = len(expected_returns)
     initial_weights = np.ones(n) / n
+    capped = min(max_weight, 1.0)
 
     def port_vol(w):
         return np.sqrt(max(0.0, np.dot(w.T, np.dot(cov_matrix, w))))
 
     constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
-    bounds = tuple((0.0, min(max_weight, 1.0)) for _ in range(n))
+    bounds = tuple((0.0, capped) for _ in range(n))
 
     result = minimize(
         port_vol,
@@ -156,6 +166,10 @@ def compute_efficient_frontier(
     Generate points on the efficient frontier by sweeping target returns
     from the minimum-variance portfolio return to the maximum achievable return.
 
+    Only the EFFICIENT (upper) half of the minimum-variance frontier is kept:
+    after generating all points, dominated points (where a higher-return portfolio
+    exists at the same or lower volatility) are filtered out.
+
     Args:
         expected_returns: Annualised expected returns vector
         cov_matrix: Annualised covariance matrix
@@ -175,7 +189,6 @@ def compute_efficient_frontier(
     min_vol = portfolio_volatility(min_vol_weights, cov_matrix)
 
     # Upper bound: the max return achievable under the weight constraint
-    # With max_weight < 1, we can't just put everything in the best asset
     max_ret_weights = _optimize_max_return(expected_returns, n, capped_max)
     max_ret = portfolio_return(max_ret_weights, expected_returns)
 
@@ -184,10 +197,10 @@ def compute_efficient_frontier(
         max_ret = min_ret + 0.01
 
     target_returns = np.linspace(min_ret, max_ret, n_points)
-    frontier: list[dict] = []
+    raw_frontier: list[dict] = []
 
     # Always include the min-vol point first
-    frontier.append({
+    raw_frontier.append({
         "expected_return": round(float(min_ret), 6),
         "volatility": round(float(min_vol), 6),
         "weights": {
@@ -218,7 +231,7 @@ def compute_efficient_frontier(
             current_guess = result.x  # Warm start next iteration
             vol = portfolio_volatility(result.x, cov_matrix)
             ret = portfolio_return(result.x, expected_returns)
-            frontier.append({
+            raw_frontier.append({
                 "expected_return": round(ret, 6),
                 "volatility": round(vol, 6),
                 "weights": {
@@ -227,10 +240,20 @@ def compute_efficient_frontier(
                 },
             })
 
-    # Sort by volatility for a clean curve
-    frontier.sort(key=lambda p: p["volatility"])
+    # ── Filter inefficient points ───────────────────────────────────
+    # Sort by volatility, then keep only monotonically increasing returns.
+    # This removes the "lower half" of the parabola (dominated portfolios
+    # where you take more risk for LESS return).
+    raw_frontier.sort(key=lambda p: p["volatility"])
 
-    return frontier
+    efficient: list[dict] = []
+    if raw_frontier:
+        efficient.append(raw_frontier[0])
+        for p in raw_frontier[1:]:
+            if p["expected_return"] >= efficient[-1]["expected_return"]:
+                efficient.append(p)
+
+    return efficient
 
 
 def _optimize_max_return(
@@ -280,24 +303,23 @@ def generate_monte_carlo_portfolios(
         # Generate random weights using Dirichlet distribution
         weights = np.random.dirichlet(np.ones(n))
 
-        # Enforce max weight constraint by redistributing excess
-        for _ in range(10):  # Iterate a few times to converge
+        # Enforce max weight constraint by iterative redistribution
+        for _ in range(10):
             excess = np.maximum(weights - capped_max, 0.0)
             if excess.sum() < 1e-10:
                 break
             weights = np.minimum(weights, capped_max)
-            # Redistribute excess proportionally among non-capped assets
             remaining = 1.0 - weights.sum()
             uncapped_mask = weights < capped_max
             if uncapped_mask.sum() > 0:
                 weights[uncapped_mask] += remaining * (
                     weights[uncapped_mask] / max(weights[uncapped_mask].sum(), 1e-10)
                 )
-            weights /= weights.sum()  # Normalize
+            weights /= weights.sum()
 
         ret = portfolio_return(weights, expected_returns)
         vol = portfolio_volatility(weights, cov_matrix)
-        sharpe = (ret - risk_free_rate) / vol if vol > 1e-10 else 0.0
+        sharpe = (ret - risk_free_rate) / vol if vol > 1e-8 else 0.0
 
         portfolios.append({
             "expected_return": round(ret, 6),

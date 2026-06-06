@@ -109,10 +109,13 @@ def get_price_changes(symbols: list[str]) -> dict[str, float]:
 
 # ── Historical Returns ──────────────────────────────────────────────
 
+MIN_TRADING_DAYS = 60  # Minimum rows needed for stable covariance estimation
+
+
 def get_historical_data(
     symbols: list[str],
     period: str = "1y"
-) -> tuple[np.ndarray, np.ndarray, list[str]]:
+) -> tuple[np.ndarray, np.ndarray, list[str], dict[str, float]]:
     """
     Fetch historical daily closing prices, compute log returns, and
     return annualised expected returns and the covariance matrix.
@@ -121,6 +124,8 @@ def get_historical_data(
         expected_returns: np.ndarray of shape (n_assets,) — annualised mean returns
         cov_matrix: np.ndarray of shape (n_assets, n_assets) — annualised covariance
         valid_symbols: list[str] — symbols for which data was successfully fetched
+        last_prices: dict[str, float] — terminal closing price for each valid symbol
+            (used to keep current-weight and frontier calculations consistent)
     """
     cache_key = f"hist:{'|'.join(sorted(symbols))}:{period}"
     cached = _history_cache.get(cache_key, HISTORICAL_CACHE_TTL)
@@ -148,9 +153,15 @@ def get_historical_data(
         closes = data[["Close"]]
         closes.columns = symbols
 
-    # Drop columns with too many NaN values (>30% missing)
+    # ── NaN handling ────────────────────────────────────────────────
+    # 1. Drop columns with too many NaN values (>30% missing)
     threshold = len(closes) * 0.7
     closes = closes.dropna(axis=1, thresh=int(threshold))
+
+    # 2. Forward-fill small gaps (holidays, short suspensions)
+    closes = closes.ffill()
+
+    # 3. Drop any remaining rows with NaN (start-of-series alignment)
     closes = closes.dropna()
 
     if closes.empty or closes.shape[1] < 2:
@@ -159,18 +170,45 @@ def get_historical_data(
             "overlapping trading history."
         )
 
+    # 4. Enforce minimum trading days for stable covariance estimation
+    if closes.shape[0] < MIN_TRADING_DAYS:
+        raise ValueError(
+            f"Only {closes.shape[0]} trading days available, but at least "
+            f"{MIN_TRADING_DAYS} are required for stable covariance estimation. "
+            f"Try a longer lookback period."
+        )
+
     valid_symbols = list(closes.columns)
 
-    # Compute log returns
+    # ── Extract terminal prices ─────────────────────────────────────
+    # Use the last close from the SAME data source that generates returns,
+    # so current-weight calculations and frontier points share one price snapshot.
+    last_prices = {
+        sym: float(closes[sym].iloc[-1])
+        for sym in valid_symbols
+    }
+
+    # ── Compute log returns ─────────────────────────────────────────
     log_returns = np.log(closes / closes.shift(1)).dropna()
 
-    # Annualised expected returns (mean daily return × trading days)
+    # Annualised expected returns (mean daily log return × trading days)
     expected_returns = log_returns.mean().values * TRADING_DAYS_PER_YEAR
 
     # Annualised covariance matrix
+    # NOTE: .cov() returns the sample covariance of daily log returns.
+    # Covariance scales linearly with time under i.i.d. assumption,
+    # so we multiply by 252 (NOT sqrt(252) — that's for std dev only).
     cov_matrix = log_returns.cov().values * TRADING_DAYS_PER_YEAR
 
-    result = (expected_returns, cov_matrix, valid_symbols)
+    # Sanity check: covariance matrix should not contain NaN
+    if np.any(np.isnan(cov_matrix)) or np.any(np.isnan(expected_returns)):
+        raise ValueError(
+            "Computed returns or covariance matrix contains NaN values. "
+            "This usually means one or more instruments have constant prices "
+            "(e.g., near-cash ETFs like LIQUIDBEES). Try removing them."
+        )
+
+    result = (expected_returns, cov_matrix, valid_symbols, last_prices)
     _history_cache.set(cache_key, result)
 
     return result
