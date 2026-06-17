@@ -67,13 +67,14 @@ export async function fetchPrices(symbols) {
  * @param {string} lookback - Period string (e.g., "1y", "6mo")
  * @param {number|null} riskFreeRate - Override risk-free rate
  */
-export async function analyzePortfolio(holdings, lookback = '1y', riskFreeRate = null, maxWeight = 1.0) {
+export async function analyzePortfolio(holdings, lookback = '1y', riskFreeRate = null, maxWeight = 1.0, nSimulations = 50000) {
   const body = {
     holdings: holdings.map(h => {
       const parsed = parseFloat(h.units);
       return { symbol: h.symbol, units: isNaN(parsed) ? 0 : parsed };
     }),
     lookback,
+    n_simulations: nSimulations,
   };
   if (riskFreeRate !== null) {
     body.risk_free_rate = riskFreeRate;

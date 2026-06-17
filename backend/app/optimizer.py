@@ -1,24 +1,30 @@
 """
-Mean-Variance Portfolio Optimization Engine.
-Implements Markowitz efficient frontier using scipy.optimize (SLSQP),
-plus Monte Carlo random portfolio simulation for visualization.
+Monte Carlo Portfolio Optimization Engine.
+
+Instead of analytical SLSQP optimization, this engine generates a large number
+of random portfolio weight combinations, evaluates each for return/risk/Sharpe,
+and selects the MEDIAN of the top performers as the recommended allocation.
+
+This is more robust than gradient-based optimization because:
+1. It doesn't get stuck in local minima
+2. Choosing the median (not the best) avoids overfitting to noise
+3. The full simulation cloud provides visual proof of optimality
 """
 
 import numpy as np
-from scipy.optimize import minimize
+from app.config import TRADING_DAYS_PER_YEAR
 
-from app.config import FRONTIER_POINTS
 
+# ── Core Portfolio Math ─────────────────────────────────────────────
 
 def portfolio_return(weights: np.ndarray, expected_returns: np.ndarray) -> float:
-    """Calculate the expected portfolio return."""
+    """Annualised expected portfolio return."""
     return float(np.dot(weights, expected_returns))
 
 
 def portfolio_volatility(weights: np.ndarray, cov_matrix: np.ndarray) -> float:
-    """Calculate the portfolio volatility (standard deviation)."""
+    """Annualised portfolio volatility (standard deviation)."""
     variance = np.dot(weights.T, np.dot(cov_matrix, weights))
-    # Guard against tiny negative values from floating point
     return float(np.sqrt(max(0.0, variance)))
 
 
@@ -28,7 +34,7 @@ def portfolio_sharpe(
     cov_matrix: np.ndarray,
     risk_free_rate: float,
 ) -> float:
-    """Calculate the Sharpe ratio of a portfolio."""
+    """Portfolio Sharpe ratio = (Rp - Rf) / σp."""
     ret = portfolio_return(weights, expected_returns)
     vol = portfolio_volatility(weights, cov_matrix)
     if vol < 1e-8:
@@ -43,11 +49,7 @@ def compute_portfolio_metrics(
     risk_free_rate: float,
     symbols: list[str],
 ) -> dict:
-    """
-    Compute full metrics for a given weight allocation.
-
-    Returns dict with: expected_return, volatility, sharpe_ratio, weights
-    """
+    """Compute full metrics for a given weight allocation."""
     ret = portfolio_return(weights, expected_returns)
     vol = portfolio_volatility(weights, cov_matrix)
     sharpe = (ret - risk_free_rate) / vol if vol > 1e-8 else 0.0
@@ -60,192 +62,196 @@ def compute_portfolio_metrics(
     }
 
 
-def optimize_max_sharpe(
-    expected_returns: np.ndarray,
-    cov_matrix: np.ndarray,
-    risk_free_rate: float,
+# ── Monte Carlo Simulation Engine ──────────────────────────────────
+
+def _generate_random_weights(
+    n_assets: int,
+    n_portfolios: int,
     max_weight: float = 1.0,
 ) -> np.ndarray:
     """
-    Find the portfolio weights that maximize the Sharpe ratio.
-    Long-only constraint (weights >= 0), weights sum to 1.
-    Uses multiple random starting points to avoid local minima.
+    Generate n_portfolios random weight vectors using Dirichlet distribution.
+    Each row sums to 1.0 and respects the max_weight constraint.
 
-    When all assets underperform Rf (all Sharpe < 0), the objective surface
-    is inverted: the "best" negative Sharpe is the one closest to zero,
-    which is the minimum-volatility corner. The optimizer handles this
-    correctly because minimizing -(Rp - Rf)/σp when the numerator is always
-    negative means finding the weight vector where the ratio is least negative.
+    Returns: np.ndarray of shape (n_portfolios, n_assets)
     """
-    n = len(expected_returns)
     capped = min(max_weight, 1.0)
-    bounds = tuple((0.0, capped) for _ in range(n))
-    constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
+    all_weights = np.zeros((n_portfolios, n_assets))
 
-    def neg_sharpe(w):
-        ret = np.dot(w, expected_returns)
-        vol = np.sqrt(max(0.0, np.dot(w.T, np.dot(cov_matrix, w))))
-        # Guard: if vol → 0, Sharpe → ±∞ which causes numerical instability.
-        # Return 0.0 so the optimizer doesn't chase degenerate zero-vol solutions.
-        if vol < 1e-8:
-            return 0.0
-        return -(ret - risk_free_rate) / vol
+    for i in range(n_portfolios):
+        w = np.random.dirichlet(np.ones(n_assets))
 
-    best_result = None
-    best_val = np.inf
+        # Enforce max weight via iterative redistribution
+        for _ in range(15):
+            excess = np.maximum(w - capped, 0.0)
+            if excess.sum() < 1e-10:
+                break
+            w = np.minimum(w, capped)
+            remaining = 1.0 - w.sum()
+            uncapped = w < capped
+            if uncapped.sum() > 0:
+                w[uncapped] += remaining * (w[uncapped] / max(w[uncapped].sum(), 1e-10))
+            w /= w.sum()
 
-    # Try multiple starting points to escape local minima
-    starting_points = [np.ones(n) / n]  # Equal weight
-    for _ in range(5):
-        rw = np.random.dirichlet(np.ones(n))
-        rw = np.clip(rw, 0.0, capped)
-        rw /= rw.sum()
-        starting_points.append(rw)
+        all_weights[i] = w
 
-    for init_w in starting_points:
-        result = minimize(
-            neg_sharpe,
-            init_w,
-            method="SLSQP",
-            bounds=bounds,
-            constraints=constraints,
-            options={"maxiter": 1000, "ftol": 1e-12},
-        )
-        if result.success and result.fun < best_val:
-            best_val = result.fun
-            best_result = result
-
-    if best_result is None or not best_result.success:
-        return np.ones(n) / n
-
-    return best_result.x
+    return all_weights
 
 
-def optimize_min_volatility(
-    expected_returns: np.ndarray,
-    cov_matrix: np.ndarray,
-    max_weight: float = 1.0,
-) -> np.ndarray:
-    """
-    Find the portfolio weights that minimize volatility.
-    Long-only constraint, weights sum to 1.
-    """
-    n = len(expected_returns)
-    initial_weights = np.ones(n) / n
-    capped = min(max_weight, 1.0)
-
-    def port_vol(w):
-        return np.sqrt(max(0.0, np.dot(w.T, np.dot(cov_matrix, w))))
-
-    constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
-    bounds = tuple((0.0, capped) for _ in range(n))
-
-    result = minimize(
-        port_vol,
-        initial_weights,
-        method="SLSQP",
-        bounds=bounds,
-        constraints=constraints,
-        options={"maxiter": 1000, "ftol": 1e-12},
-    )
-
-    if not result.success:
-        return initial_weights
-
-    return result.x
-
-
-def compute_efficient_frontier(
+def run_monte_carlo_simulation(
     expected_returns: np.ndarray,
     cov_matrix: np.ndarray,
     symbols: list[str],
-    n_points: int = 50,
+    risk_free_rate: float,
+    n_simulations: int = 50000,
     max_weight: float = 1.0,
-) -> list[dict]:
+) -> dict:
     """
-    Generate points on the efficient frontier by sweeping target returns
-    from the minimum-variance portfolio return to the maximum achievable return.
+    Run the full Monte Carlo optimization pipeline.
 
-    Only the EFFICIENT (upper) half of the minimum-variance frontier is kept:
-    after generating all points, dominated points (where a higher-return portfolio
-    exists at the same or lower volatility) are filtered out.
+    1. Generate n_simulations random portfolios
+    2. Compute return, volatility, Sharpe for each
+    3. Sort by Sharpe ratio
+    4. Select the MEDIAN of the top 10% as the optimal portfolio
+    5. Select the minimum volatility portfolio
+    6. Derive the efficient frontier empirically from the cloud
 
-    Args:
-        expected_returns: Annualised expected returns vector
-        cov_matrix: Annualised covariance matrix
-        symbols: List of ticker symbols (for labelling weights)
-        n_points: Number of frontier points to generate
-        max_weight: Maximum weight for any single asset
-
-    Returns a list of dicts, each with: expected_return, volatility, weights.
+    Returns a dict with:
+        - optimal_sharpe: metrics for the median-of-top-10% portfolio
+        - min_volatility: metrics for the lowest-volatility portfolio
+        - efficient_frontier: list of frontier points
+        - monte_carlo_cloud: list of all simulation points (for visualization)
+        - simulation_stats: metadata about the run
     """
     n = len(expected_returns)
-    capped_max = min(max_weight, 1.0)
-    bounds = tuple((0.0, capped_max) for _ in range(n))
 
-    # Find the min-volatility portfolio return as the lower bound
-    min_vol_weights = optimize_min_volatility(expected_returns, cov_matrix, max_weight)
-    min_ret = portfolio_return(min_vol_weights, expected_returns)
-    min_vol = portfolio_volatility(min_vol_weights, cov_matrix)
+    # ── Step 1: Generate random portfolios ──────────────────────────
+    all_weights = _generate_random_weights(n, n_simulations, max_weight)
 
-    # Upper bound: the max return achievable under the weight constraint
-    max_ret_weights = _optimize_max_return(expected_returns, n, capped_max)
-    max_ret = portfolio_return(max_ret_weights, expected_returns)
+    # ── Step 2: Vectorised metric computation ───────────────────────
+    # Portfolio returns: (n_sim,) = (n_sim, n) @ (n,)
+    returns = all_weights @ expected_returns
 
-    # Ensure we have a valid range
-    if max_ret <= min_ret:
-        max_ret = min_ret + 0.01
+    # Portfolio volatilities: σ = sqrt(wᵀΣw) for each row
+    # Efficient: (n_sim, n) @ (n, n) → (n_sim, n), then row-wise dot with weights
+    cov_products = all_weights @ cov_matrix  # (n_sim, n)
+    variances = np.sum(cov_products * all_weights, axis=1)  # (n_sim,)
+    variances = np.maximum(variances, 0.0)  # Guard against tiny negatives
+    volatilities = np.sqrt(variances)
 
-    target_returns = np.linspace(min_ret, max_ret, n_points)
+    # Sharpe ratios
+    sharpes = np.where(
+        volatilities > 1e-8,
+        (returns - risk_free_rate) / volatilities,
+        0.0,
+    )
+
+    # ── Step 3: Find optimal portfolio (median of top 10%) ──────────
+    sharpe_sorted_indices = np.argsort(sharpes)[::-1]  # Descending
+    top_10_pct_count = max(1, n_simulations // 10)
+    top_indices = sharpe_sorted_indices[:top_10_pct_count]
+
+    # Median index within the top 10%
+    median_idx_in_top = top_indices[len(top_indices) // 2]
+    optimal_weights = all_weights[median_idx_in_top]
+
+    optimal_metrics = compute_portfolio_metrics(
+        optimal_weights, expected_returns, cov_matrix, risk_free_rate, symbols
+    )
+
+    # ── Step 4: Find minimum volatility portfolio ───────────────────
+    min_vol_idx = np.argmin(volatilities)
+    min_vol_weights = all_weights[min_vol_idx]
+
+    min_vol_metrics = compute_portfolio_metrics(
+        min_vol_weights, expected_returns, cov_matrix, risk_free_rate, symbols
+    )
+
+    # ── Step 5: Derive efficient frontier from MC cloud ─────────────
+    frontier = _derive_frontier_from_cloud(
+        returns, volatilities, all_weights, symbols, n_bins=50
+    )
+
+    # ── Step 6: Build cloud for visualization ───────────────────────
+    # Downsample to 3000 points for frontend performance
+    downsample_n = min(3000, n_simulations)
+    sample_indices = np.random.choice(n_simulations, downsample_n, replace=False)
+
+    cloud = []
+    for idx in sample_indices:
+        cloud.append({
+            "expected_return": round(float(returns[idx]), 6),
+            "volatility": round(float(volatilities[idx]), 6),
+            "sharpe_ratio": round(float(sharpes[idx]), 4),
+        })
+
+    # ── Step 7: Simulation stats ────────────────────────────────────
+    stats = {
+        "n_simulations": n_simulations,
+        "top_percentile": 10,
+        "selection_method": "median_of_top_10pct",
+        "best_sharpe": round(float(sharpes[sharpe_sorted_indices[0]]), 4),
+        "median_sharpe": round(float(sharpes[median_idx_in_top]), 4),
+        "worst_sharpe": round(float(sharpes[sharpe_sorted_indices[-1]]), 4),
+        "cloud_size": downsample_n,
+    }
+
+    return {
+        "optimal_sharpe": optimal_metrics,
+        "min_volatility": min_vol_metrics,
+        "efficient_frontier": frontier,
+        "monte_carlo_cloud": cloud,
+        "simulation_stats": stats,
+    }
+
+
+def _derive_frontier_from_cloud(
+    returns: np.ndarray,
+    volatilities: np.ndarray,
+    all_weights: np.ndarray,
+    symbols: list[str],
+    n_bins: int = 50,
+) -> list[dict]:
+    """
+    Derive the efficient frontier empirically from the Monte Carlo cloud.
+
+    Method: bin portfolios by volatility, take the highest-return portfolio
+    in each bin, then filter for monotonically increasing returns (efficient only).
+    """
+    vol_min, vol_max = volatilities.min(), volatilities.max()
+    if vol_max - vol_min < 1e-10:
+        return []
+
+    bin_edges = np.linspace(vol_min, vol_max, n_bins + 1)
     raw_frontier: list[dict] = []
 
-    # Always include the min-vol point first
-    raw_frontier.append({
-        "expected_return": round(float(min_ret), 6),
-        "volatility": round(float(min_vol), 6),
-        "weights": {
-            sym: round(float(w), 6)
-            for sym, w in zip(symbols, min_vol_weights)
-        },
-    })
+    for i in range(n_bins):
+        lo, hi = bin_edges[i], bin_edges[i + 1]
+        mask = (volatilities >= lo) & (volatilities < hi)
+        if not mask.any():
+            continue
 
-    # Warm start: use min_vol_weights as the first guess
-    current_guess = min_vol_weights.copy()
+        # Best return in this volatility bin
+        bin_returns = returns[mask]
+        best_in_bin = np.argmax(bin_returns)
 
-    for target in target_returns[1:]:  # Skip the first (min_vol already added)
-        constraints = [
-            {"type": "eq", "fun": lambda w: np.sum(w) - 1.0},
-            {"type": "eq", "fun": lambda w, t=target: np.dot(w, expected_returns) - t},
-        ]
+        # Map back to original index
+        bin_indices = np.where(mask)[0]
+        orig_idx = bin_indices[best_in_bin]
 
-        result = minimize(
-            lambda w: np.sqrt(max(0.0, np.dot(w.T, np.dot(cov_matrix, w)))),
-            current_guess,
-            method="SLSQP",
-            bounds=bounds,
-            constraints=constraints,
-            options={"maxiter": 1000, "ftol": 1e-10},
-        )
+        raw_frontier.append({
+            "expected_return": round(float(returns[orig_idx]), 6),
+            "volatility": round(float(volatilities[orig_idx]), 6),
+            "weights": {
+                sym: round(float(w), 6)
+                for sym, w in zip(symbols, all_weights[orig_idx])
+            },
+        })
 
-        if result.success:
-            current_guess = result.x  # Warm start next iteration
-            vol = portfolio_volatility(result.x, cov_matrix)
-            ret = portfolio_return(result.x, expected_returns)
-            raw_frontier.append({
-                "expected_return": round(ret, 6),
-                "volatility": round(vol, 6),
-                "weights": {
-                    sym: round(float(w), 6)
-                    for sym, w in zip(symbols, result.x)
-                },
-            })
-
-    # ── Filter inefficient points ───────────────────────────────────
-    # Sort by volatility, then keep only monotonically increasing returns.
-    # This removes the "lower half" of the parabola (dominated portfolios
-    # where you take more risk for LESS return).
+    # Sort by volatility
     raw_frontier.sort(key=lambda p: p["volatility"])
 
+    # Filter inefficient points (keep monotonically increasing returns only)
     efficient: list[dict] = []
     if raw_frontier:
         efficient.append(raw_frontier[0])
@@ -254,77 +260,3 @@ def compute_efficient_frontier(
                 efficient.append(p)
 
     return efficient
-
-
-def _optimize_max_return(
-    expected_returns: np.ndarray,
-    n: int,
-    max_weight: float,
-) -> np.ndarray:
-    """Find the portfolio weights that maximize expected return under constraints."""
-    initial_weights = np.ones(n) / n
-    bounds = tuple((0.0, max_weight) for _ in range(n))
-    constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
-
-    result = minimize(
-        lambda w: -np.dot(w, expected_returns),
-        initial_weights,
-        method="SLSQP",
-        bounds=bounds,
-        constraints=constraints,
-        options={"maxiter": 500},
-    )
-
-    if result.success:
-        return result.x
-    return initial_weights
-
-
-def generate_monte_carlo_portfolios(
-    expected_returns: np.ndarray,
-    cov_matrix: np.ndarray,
-    symbols: list[str],
-    risk_free_rate: float,
-    n_portfolios: int = 2000,
-    max_weight: float = 1.0,
-) -> list[dict]:
-    """
-    Generate random portfolios via Monte Carlo simulation.
-    Each portfolio has random weights (drawn from a Dirichlet distribution),
-    respecting the max_weight constraint.
-
-    Returns a list of dicts with: expected_return, volatility, sharpe_ratio.
-    """
-    n = len(expected_returns)
-    capped_max = min(max_weight, 1.0)
-    portfolios: list[dict] = []
-
-    for _ in range(n_portfolios):
-        # Generate random weights using Dirichlet distribution
-        weights = np.random.dirichlet(np.ones(n))
-
-        # Enforce max weight constraint by iterative redistribution
-        for _ in range(10):
-            excess = np.maximum(weights - capped_max, 0.0)
-            if excess.sum() < 1e-10:
-                break
-            weights = np.minimum(weights, capped_max)
-            remaining = 1.0 - weights.sum()
-            uncapped_mask = weights < capped_max
-            if uncapped_mask.sum() > 0:
-                weights[uncapped_mask] += remaining * (
-                    weights[uncapped_mask] / max(weights[uncapped_mask].sum(), 1e-10)
-                )
-            weights /= weights.sum()
-
-        ret = portfolio_return(weights, expected_returns)
-        vol = portfolio_volatility(weights, cov_matrix)
-        sharpe = (ret - risk_free_rate) / vol if vol > 1e-8 else 0.0
-
-        portfolios.append({
-            "expected_return": round(ret, 6),
-            "volatility": round(vol, 6),
-            "sharpe_ratio": round(sharpe, 4),
-        })
-
-    return portfolios

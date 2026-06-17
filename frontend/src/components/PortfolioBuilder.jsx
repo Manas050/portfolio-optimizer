@@ -3,7 +3,7 @@ import { Trash2 } from 'lucide-react';
 import SectorBrowser from './SectorBrowser';
 import { fetchPrices } from '../services/api';
 
-const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading, riskFreeRate, setRiskFreeRate, maxWeight, setMaxWeight }) => {
+const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading, riskFreeRate, setRiskFreeRate, maxWeight, setMaxWeight, nSimulations, setNSimulations }) => {
   const [prices, setPrices] = useState({});
 
   useEffect(() => {
@@ -160,14 +160,34 @@ const PortfolioBuilder = ({ holdings, setHoldings, onOptimize, loading, riskFree
             </div>
           </div>
 
-          {/* Execute Button */}
+          {/* Simulations Row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem', fontSize: '0.7rem' }}>
+            <span style={{ color: 'var(--text-secondary)' }}>SIMULATIONS:</span>
+            {[10000, 25000, 50000, 100000].map(n => (
+              <button
+                key={n}
+                onClick={() => setNSimulations(n)}
+                style={{
+                  padding: '0.15rem 0.4rem',
+                  fontSize: '0.65rem',
+                  fontFamily: 'JetBrains Mono',
+                  background: nSimulations === n ? 'var(--accent)' : 'transparent',
+                  color: nSimulations === n ? '#000' : 'var(--text-secondary)',
+                  border: '1px solid ' + (nSimulations === n ? 'var(--accent)' : 'var(--border-color)'),
+                  cursor: 'pointer',
+                }}
+              >
+                {n >= 1000 ? `${n/1000}K` : n}
+              </button>
+            ))}
+          </div>
           <button 
             className="btn" 
             style={{ width: '100%' }}
             onClick={() => onOptimize(holdings)}
             disabled={holdings.length < 2 || loading}
           >
-            {loading ? 'RUNNING OPTIMIZER...' : 'EXECUTE [ OPTIMIZE ]'}
+            {loading ? `RUNNING ${nSimulations.toLocaleString()} SIMULATIONS...` : `RUN MONTE CARLO [${(nSimulations/1000).toFixed(0)}K]`}
           </button>
         </div>
         

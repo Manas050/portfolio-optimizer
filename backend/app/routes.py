@@ -13,16 +13,11 @@ from app.schemas import (
     InstrumentInfo,
     PriceInfo,
     PriceRequest,
+    SimulationStats,
 )
 from app.instruments import search_instruments, get_popular_instruments, get_instrument_name, get_instruments_by_sector
 from app.data_service import get_current_prices, get_price_changes, get_historical_data
-from app.optimizer import (
-    compute_portfolio_metrics,
-    optimize_max_sharpe,
-    optimize_min_volatility,
-    compute_efficient_frontier,
-    generate_monte_carlo_portfolios,
-)
+from app.optimizer import compute_portfolio_metrics, run_monte_carlo_simulation
 
 import numpy as np
 
@@ -81,12 +76,14 @@ async def api_get_prices(request: PriceRequest):
 @router.post("/portfolio/analyze", response_model=AnalyzeResponse)
 async def api_analyze_portfolio(request: AnalyzeRequest):
     """
-    Full portfolio analysis:
-    1. Fetch current prices → compute holding values and weights
+    Monte Carlo portfolio optimization pipeline:
+    1. Fetch current prices → compute holding values and current weights
     2. Fetch historical data → compute expected returns and covariance
-    3. Optimise: max Sharpe, min volatility
-    4. Generate efficient frontier
-    5. Return everything
+    3. Run N Monte Carlo simulations (random weight combinations)
+    4. Select median of top 10% by Sharpe as optimal allocation
+    5. Select minimum volatility portfolio
+    6. Derive efficient frontier from the simulation cloud
+    7. Return results with warnings
     """
     symbols = [h.symbol for h in request.holdings]
     units_map = {h.symbol: h.units for h in request.holdings}
@@ -95,6 +92,7 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
     if risk_free_rate > 1.0:
         risk_free_rate = risk_free_rate / 100.0
     lookback = request.lookback or DEFAULT_LOOKBACK_PERIOD
+    n_simulations = request.n_simulations
 
     # ── Step 1: Current prices & values ─────────────────────────────
     try:
@@ -102,7 +100,6 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch prices: {str(e)}")
 
-    # Check all symbols have prices
     missing = [s for s in symbols if s not in prices]
     if missing:
         raise HTTPException(
@@ -124,12 +121,11 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
                 units=units_map[symbol],
                 price=prices[symbol],
                 value=round(value, 2),
-                weight=0.0,  # will be filled after total is known
+                weight=0.0,
             )
         )
 
     if total_value <= 0:
-        # If no units provided, simulate a hypothetical 1,00,000 INR equal-weighted portfolio
         simulated_total = 100000.0
         allocation_per_asset = simulated_total / len(symbols)
         total_value = 0.0
@@ -138,11 +134,8 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
             h.units = round(allocation_per_asset / prices[h.symbol], 2) if prices.get(h.symbol) else 0
             total_value += h.value
 
-    # Fill in weights
     for h in holdings_detail:
         h.weight = round(h.value / total_value, 6)
-
-    current_weights = np.array([h.weight for h in holdings_detail])
 
     # ── Step 2: Historical data ─────────────────────────────────────
     try:
@@ -152,90 +145,77 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch historical data: {str(e)}")
 
-    # Reorder weights to match valid_symbols order from yfinance
-    # (yfinance alphabetises columns, so we must align weights accordingly)
+    # Handle dropped symbols
     if set(valid_symbols) != set(symbols):
-        # Some symbols were dropped due to insufficient data
         logger.warning(
             f"Dropped symbols due to insufficient data: "
             f"{set(symbols) - set(valid_symbols)}"
         )
-        # Rebuild holdings for valid symbols
         holdings_detail = [h for h in holdings_detail if h.symbol in set(valid_symbols)]
         total_value = sum(h.value for h in holdings_detail)
         for h in holdings_detail:
             h.weight = round(h.value / total_value, 6) if total_value > 0 else 0.0
 
-    # Use historical terminal prices for consistency between weights and frontier
-    # (avoids stale-cache drift between live prices and historical data)
+    # Use consistent prices from historical data
     consistent_prices = {s: hist_prices.get(s, prices.get(s, 1.0)) for s in valid_symbols}
-
-    # Recompute holdings values using consistent prices
     for h in holdings_detail:
         if h.symbol in consistent_prices:
             h.price = consistent_prices[h.symbol]
             h.value = round(h.units * h.price, 2)
     total_value = sum(h.value for h in holdings_detail)
     if total_value <= 0:
-        total_value = 1.0  # Prevent division by zero for hypothetical portfolios
+        total_value = 1.0
     for h in holdings_detail:
         h.weight = round(h.value / total_value, 6)
 
-    # Always build current_weights in valid_symbols order
+    # Current weights in valid_symbols order
     weight_map = {h.symbol: h.value for h in holdings_detail}
     current_weights = np.array([
         weight_map.get(s, 0.0) / total_value if total_value > 0 else 0.0
         for s in valid_symbols
     ])
 
+    # Max weight constraint
     max_weight = request.max_weight if request.max_weight is not None else 1.0
     n_assets = len(valid_symbols)
     min_feasible_weight = 1.0 / n_assets
     if max_weight < min_feasible_weight:
-        # Can't sum to 1.0 if every asset is capped below 1/n, so clamp to equal-weight
         max_weight = min_feasible_weight
 
-    # ── Step 3: Optimise ────────────────────────────────────────────
+    # ── Step 3: Current portfolio metrics ───────────────────────────
     current_metrics = compute_portfolio_metrics(
         current_weights, expected_returns, cov_matrix, risk_free_rate, valid_symbols
     )
     current_metrics["units"] = {s: units_map.get(s, 0.0) for s in valid_symbols}
 
-    max_sharpe_weights = optimize_max_sharpe(expected_returns, cov_matrix, risk_free_rate, max_weight)
-    max_sharpe_metrics = compute_portfolio_metrics(
-        max_sharpe_weights, expected_returns, cov_matrix, risk_free_rate, valid_symbols
-    )
-    max_sharpe_metrics["units"] = {
-        s: round((max_sharpe_metrics["weights"][s] * total_value) / consistent_prices[s]) if consistent_prices[s] > 0 else 0
-        for s in valid_symbols
-    }
-
-    min_vol_weights = optimize_min_volatility(expected_returns, cov_matrix, max_weight)
-    min_vol_metrics = compute_portfolio_metrics(
-        min_vol_weights, expected_returns, cov_matrix, risk_free_rate, valid_symbols
-    )
-    min_vol_metrics["units"] = {
-        s: round((min_vol_metrics["weights"][s] * total_value) / consistent_prices[s]) if consistent_prices[s] > 0 else 0
-        for s in valid_symbols
-    }
-
-    # ── Step 4: Efficient frontier ──────────────────────────────────
-    frontier = compute_efficient_frontier(
-        expected_returns, cov_matrix, valid_symbols,
-        n_points=50, max_weight=max_weight,
-    )
-
-    # ── Step 5: Monte Carlo simulation ──────────────────────────────
-    monte_carlo = generate_monte_carlo_portfolios(
-        expected_returns, cov_matrix, valid_symbols,
+    # ── Step 4: Run Monte Carlo simulation ──────────────────────────
+    mc_results = run_monte_carlo_simulation(
+        expected_returns=expected_returns,
+        cov_matrix=cov_matrix,
+        symbols=valid_symbols,
         risk_free_rate=risk_free_rate,
-        n_portfolios=2000, max_weight=max_weight,
+        n_simulations=n_simulations,
+        max_weight=max_weight,
     )
 
-    # ── Step 6: Generate warnings ───────────────────────────────────
+    optimal_metrics = mc_results["optimal_sharpe"]
+    min_vol_metrics = mc_results["min_volatility"]
+
+    # Compute suggested units for optimized portfolios
+    optimal_metrics["units"] = {
+        s: round((optimal_metrics["weights"][s] * total_value) / consistent_prices[s])
+        if consistent_prices.get(s, 0) > 0 else 0
+        for s in valid_symbols
+    }
+    min_vol_metrics["units"] = {
+        s: round((min_vol_metrics["weights"][s] * total_value) / consistent_prices[s])
+        if consistent_prices.get(s, 0) > 0 else 0
+        for s in valid_symbols
+    }
+
+    # ── Step 5: Generate warnings ───────────────────────────────────
     warnings: list[str] = []
 
-    # Check if all individual asset Sharpe ratios are negative
     all_negative = all(
         (er - risk_free_rate) / np.sqrt(cov_matrix[i][i]) < 0
         for i, er in enumerate(expected_returns)
@@ -245,27 +225,26 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         warnings.append(
             f"⚠ ALL {n_assets} ASSETS UNDERPERFORM THE RISK-FREE RATE ({risk_free_rate*100:.1f}%). "
             "No portfolio combination can achieve a positive Sharpe ratio. "
-            "The optimizer picks the 'least bad' allocation. Consider diversifying into "
-            "assets from other sectors or adjusting the lookback period."
+            "The simulator picks the 'least bad' allocation. Consider diversifying "
+            "into other sectors or adjusting the lookback period."
         )
 
-    if max_sharpe_metrics["sharpe_ratio"] < 0:
+    if optimal_metrics["sharpe_ratio"] < 0:
         warnings.append(
-            f"⚠ OPTIMAL SHARPE IS NEGATIVE ({max_sharpe_metrics['sharpe_ratio']:.3f}). "
-            "The recommended portfolio still loses vs. the risk-free rate. "
-            "This is not a bug — it's the best allocation given these assets' recent performance."
+            f"⚠ OPTIMAL SHARPE IS NEGATIVE ({optimal_metrics['sharpe_ratio']:.3f}). "
+            "The recommended portfolio still underperforms the risk-free rate. "
+            "This is the median of the top 10% simulations — the best robust allocation "
+            "given these assets' recent performance."
         )
 
-    # Check for corner solution
-    max_single_weight = max(max_sharpe_metrics["weights"].values())
+    max_single_weight = max(optimal_metrics["weights"].values())
     if max_single_weight > 0.95 and n_assets >= 3:
-        dominant_asset = max(max_sharpe_metrics["weights"], key=max_sharpe_metrics["weights"].get)
+        dominant = max(optimal_metrics["weights"], key=optimal_metrics["weights"].get)
         warnings.append(
-            f"⚠ CORNER SOLUTION: {dominant_asset.replace('.NS','')} at {max_single_weight*100:.0f}% allocation. "
+            f"⚠ CORNER SOLUTION: {dominant.replace('.NS','')} at {max_single_weight*100:.0f}% allocation. "
             f"Lower the MAX ALLOC constraint (currently {max_weight*100:.0f}%) to force diversification."
         )
 
-    # Warn if max_weight was clamped
     requested_max = request.max_weight if request.max_weight is not None else 1.0
     if requested_max < min_feasible_weight:
         warnings.append(
@@ -273,15 +252,18 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
             f"(minimum is {min_feasible_weight*100:.1f}%). Clamped to {max_weight*100:.1f}%."
         )
 
-    # ── Step 7: Return response ─────────────────────────────────────
+    stats = mc_results["simulation_stats"]
+
+    # ── Step 6: Return response ─────────────────────────────────────
     return AnalyzeResponse(
         holdings=holdings_detail,
         total_value=round(total_value, 2),
         current_portfolio=current_metrics,
-        optimal_sharpe=max_sharpe_metrics,
+        optimal_sharpe=optimal_metrics,
         min_volatility=min_vol_metrics,
-        efficient_frontier=frontier,
-        monte_carlo=monte_carlo,
+        efficient_frontier=mc_results["efficient_frontier"],
+        monte_carlo=mc_results["monte_carlo_cloud"],
+        simulation_stats=SimulationStats(**stats),
         lookback=lookback,
         risk_free_rate=risk_free_rate,
         effective_max_weight=max_weight,

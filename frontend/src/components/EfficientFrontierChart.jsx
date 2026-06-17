@@ -14,7 +14,9 @@ import {
 const EfficientFrontierChart = ({ results }) => {
   if (!results || !results.efficient_frontier) return null;
 
-  const { efficient_frontier, current_portfolio, optimal_sharpe, min_volatility, monte_carlo } = results;
+  const { efficient_frontier, current_portfolio, optimal_sharpe, min_volatility, monte_carlo, simulation_stats } = results;
+  const simCount = simulation_stats?.n_simulations?.toLocaleString() || '50,000';
+  const cloudCount = monte_carlo?.length || 0;
 
   // Frontier curve data
   const frontierData = useMemo(() => {
@@ -121,7 +123,14 @@ const EfficientFrontierChart = ({ results }) => {
 
   return (
     <div className="glass-panel">
-      <div className="panel-header">[ VIZ: EFFICIENT FRONTIER & MONTE CARLO ]</div>
+      <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>[ VIZ: MONTE CARLO SIMULATION CLOUD ]</span>
+        {simulation_stats && (
+          <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+            {simCount} SIMULATIONS · TOP {simulation_stats.top_percentile}% → MEDIAN
+          </span>
+        )}
+      </div>
 
       <div style={{ height: '450px', width: '100%', paddingRight: '1rem' }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -200,7 +209,7 @@ const EfficientFrontierChart = ({ results }) => {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <div style={{ width: '10px', height: '10px', backgroundColor: 'rgba(200,200,100,0.35)', borderRadius: '50%' }}></div>
-          MONTE CARLO ({mcData.length.toLocaleString()})
+          MONTE CARLO ({cloudCount.toLocaleString()} shown)
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <div style={{ width: '10px', height: '10px', backgroundColor: '#ff4444', transform: 'rotate(45deg)' }}></div>
@@ -208,7 +217,7 @@ const EfficientFrontierChart = ({ results }) => {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <div style={{ width: '12px', height: '12px', backgroundColor: '#00ff88', clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' }}></div>
-          MAX SHARPE
+          OPTIMAL (MEDIAN TOP-10%)
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <div style={{ width: '10px', height: '10px', backgroundColor: '#ffd700', clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}></div>

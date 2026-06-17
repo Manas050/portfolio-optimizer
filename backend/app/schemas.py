@@ -44,6 +44,11 @@ class AnalyzeRequest(BaseModel):
         default=1.0,
         description="Maximum allowed weight for any single asset (e.g. 0.4 for 40%)"
     )
+    n_simulations: int = Field(
+        default=50000,
+        ge=1000, le=200000,
+        description="Number of Monte Carlo simulations to run"
+    )
 
 
 # ── Portfolio Metrics ───────────────────────────────────────────────
@@ -71,6 +76,19 @@ class MonteCarloPoint(BaseModel):
     expected_return: float
     volatility: float
     sharpe_ratio: float
+
+
+# ── Simulation Stats ───────────────────────────────────────────────
+
+class SimulationStats(BaseModel):
+    """Metadata about the Monte Carlo simulation run."""
+    n_simulations: int
+    top_percentile: int
+    selection_method: str
+    best_sharpe: float
+    median_sharpe: float
+    worst_sharpe: float
+    cloud_size: int
 
 
 # ── Price Info ──────────────────────────────────────────────────────
@@ -106,11 +124,14 @@ class AnalyzeResponse(BaseModel):
     optimal_sharpe: PortfolioMetrics
     min_volatility: PortfolioMetrics
 
-    # Efficient frontier curve
+    # Efficient frontier curve (derived from MC cloud)
     efficient_frontier: list[EfficientFrontierPoint]
 
-    # Monte Carlo random portfolios
+    # Monte Carlo cloud (downsampled for viz)
     monte_carlo: list[MonteCarloPoint] = []
+
+    # Simulation metadata
+    simulation_stats: Optional[SimulationStats] = None
 
     # Config used
     lookback: str
