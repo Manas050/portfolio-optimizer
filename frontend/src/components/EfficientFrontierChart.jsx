@@ -124,10 +124,10 @@ const EfficientFrontierChart = ({ results }) => {
   return (
     <div className="glass-panel">
       <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>[ VIZ: MONTE CARLO SIMULATION CLOUD ]</span>
+        <span>[ VIZ: MONTE CARLO CLOUD + SLSQP FRONTIER ]</span>
         {simulation_stats && (
           <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-            {simCount} SIMULATIONS · TOP {simulation_stats.top_percentile}% → MEDIAN
+            {simCount} MC SIMS · SLSQP FRONTIER (50 pts)
           </span>
         )}
       </div>
@@ -205,7 +205,7 @@ const EfficientFrontierChart = ({ results }) => {
       <div style={{ display: 'flex', gap: '1.5rem', justifyContent: 'center', marginTop: '1rem', fontSize: '0.75rem', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <div style={{ width: '20px', height: '3px', backgroundColor: '#00e5ff', borderRadius: '2px' }}></div>
-          EFFICIENT FRONTIER
+          SLSQP FRONTIER
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
           <div style={{ width: '10px', height: '10px', backgroundColor: 'rgba(200,200,100,0.35)', borderRadius: '50%' }}></div>

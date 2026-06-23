@@ -196,6 +196,7 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         risk_free_rate=risk_free_rate,
         n_simulations=n_simulations,
         max_weight=max_weight,
+        n_frontier_points=50,
     )
 
     optimal_metrics = mc_results["optimal_sharpe"]
