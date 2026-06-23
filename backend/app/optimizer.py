@@ -53,9 +53,27 @@ def compute_portfolio_metrics(
     risk_free_rate: float,
     symbols: list[str],
 ) -> dict:
-    """Full metrics dict for a weight vector."""
-    ret = portfolio_return(weights, expected_returns)
-    vol = portfolio_volatility(weights, cov_matrix)
+    """
+    Full metrics dict for a weight vector.
+
+    risk_free_rate MUST be a decimal (e.g. 0.068 for 6.8%).
+    Values > 1.0 are clamped with a warning — they indicate a
+    percentage was passed instead of a decimal, which would produce
+    a wildly incorrect (and negative) Sharpe ratio.
+    """
+    # Guard: never let a raw-percentage Rf corrupt Sharpe
+    if risk_free_rate > 1.0:
+        import warnings as _w
+        _w.warn(
+            f"compute_portfolio_metrics received risk_free_rate={risk_free_rate} (>1.0). "
+            "Expected a decimal (e.g. 0.068). Dividing by 100 automatically.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        risk_free_rate = risk_free_rate / 100.0
+
+    ret    = portfolio_return(weights, expected_returns)
+    vol    = portfolio_volatility(weights, cov_matrix)
     sharpe = (ret - risk_free_rate) / vol if vol > 1e-8 else 0.0
     return {
         "expected_return": round(ret, 6),

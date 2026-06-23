@@ -3,6 +3,7 @@ API route definitions for the portfolio optimizer.
 """
 
 import logging
+import copy
 from fastapi import APIRouter, HTTPException, Query
 
 from app.config import RISK_FREE_RATE, DEFAULT_LOOKBACK_PERIOD
@@ -69,6 +70,18 @@ async def api_get_prices(request: PriceRequest):
     except Exception as e:
         logger.error(f"Error fetching prices: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch prices: {str(e)}")
+
+
+@router.get("/health")
+async def api_health():
+    """Health check — also exposes active config so you can confirm the deployed version."""
+    import datetime
+    return {
+        "status": "ok",
+        "engine": "hybrid-mc-slsqp-v3",
+        "default_rf_pct": round(RISK_FREE_RATE * 100, 2),
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+    }
 
 
 # ── Portfolio Analysis ──────────────────────────────────────────────
@@ -199,8 +212,10 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         n_frontier_points=50,
     )
 
-    optimal_metrics = mc_results["optimal_sharpe"]
-    min_vol_metrics = mc_results["min_volatility"]
+    # Deep-copy before mutation so the original dicts inside mc_results
+    # are never aliased — prevents sharpe_ratio corruption.
+    optimal_metrics  = copy.deepcopy(mc_results["optimal_sharpe"])
+    min_vol_metrics  = copy.deepcopy(mc_results["min_volatility"])
 
     # Compute suggested units for optimized portfolios
     optimal_metrics["units"] = {
