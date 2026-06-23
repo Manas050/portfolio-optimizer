@@ -4,6 +4,7 @@ API route definitions for the portfolio optimizer.
 
 import logging
 import copy
+import datetime
 from fastapi import APIRouter, HTTPException, Query
 
 from app.config import RISK_FREE_RATE, DEFAULT_LOOKBACK_PERIOD
@@ -18,12 +19,25 @@ from app.schemas import (
 )
 from app.instruments import search_instruments, get_popular_instruments, get_instrument_name, get_instruments_by_sector
 from app.data_service import get_current_prices, get_price_changes, get_historical_data
-from app.optimizer import compute_portfolio_metrics, run_monte_carlo_simulation
+from app.optimizer import compute_portfolio_metrics, run_optimization
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
+
+
+# ── Health ──────────────────────────────────────────────────────────
+
+@router.get("/health")
+async def api_health():
+    """Health check — exposes active engine version and config."""
+    return {
+        "status": "ok",
+        "engine": "mc-seeded-slsqp-v4",
+        "default_rf_pct": round(RISK_FREE_RATE * 100, 2),
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+    }
 
 
 # ── Instrument Search ───────────────────────────────────────────────
@@ -34,8 +48,7 @@ async def api_search_instruments(
     limit: int = Query(20, ge=1, le=50),
 ):
     """Search the instrument catalog by name, symbol, or sector."""
-    results = search_instruments(q, limit=limit)
-    return results
+    return search_instruments(q, limit=limit)
 
 
 @router.get("/instruments/popular", response_model=list[InstrumentInfo])
@@ -56,15 +69,10 @@ async def api_sectors_instruments():
 async def api_get_prices(request: PriceRequest):
     """Fetch live prices for the given symbols."""
     try:
-        prices = get_current_prices(request.symbols)
+        prices  = get_current_prices(request.symbols)
         changes = get_price_changes(request.symbols)
-
         return [
-            PriceInfo(
-                symbol=symbol,
-                price=price,
-                change_pct=changes.get(symbol),
-            )
+            PriceInfo(symbol=symbol, price=price, change_pct=changes.get(symbol))
             for symbol, price in prices.items()
         ]
     except Exception as e:
@@ -72,42 +80,31 @@ async def api_get_prices(request: PriceRequest):
         raise HTTPException(status_code=500, detail=f"Failed to fetch prices: {str(e)}")
 
 
-@router.get("/health")
-async def api_health():
-    """Health check — also exposes active config so you can confirm the deployed version."""
-    import datetime
-    return {
-        "status": "ok",
-        "engine": "hybrid-mc-slsqp-v3",
-        "default_rf_pct": round(RISK_FREE_RATE * 100, 2),
-        "timestamp": datetime.datetime.utcnow().isoformat(),
-    }
-
-
 # ── Portfolio Analysis ──────────────────────────────────────────────
 
 @router.post("/portfolio/analyze", response_model=AnalyzeResponse)
 async def api_analyze_portfolio(request: AnalyzeRequest):
     """
-    Monte Carlo portfolio optimization pipeline:
-    1. Fetch current prices → compute holding values and current weights
-    2. Fetch historical data → compute expected returns and covariance
-    3. Run N Monte Carlo simulations (random weight combinations)
-    4. Select median of top 10% by Sharpe as optimal allocation
-    5. Select minimum volatility portfolio
-    6. Derive efficient frontier from the simulation cloud
-    7. Return results with warnings
+    MC-Seeded SLSQP portfolio optimization pipeline:
+
+    1.  Fetch live prices → current holdings values & weights
+    2.  Fetch historical data → μ (expected returns) + Σ (covariance)
+    3.  Monte Carlo exploration (n_simulations random portfolios)
+    4.  SLSQP refinement from top-K MC seeds → exact Max Sharpe & Min Vol
+    5.  SLSQP efficient frontier sweep (50 analytical points)
+    6.  Warnings: all-negative Sharpe, corner solutions, constraint clamping
     """
-    symbols = [h.symbol for h in request.holdings]
+    symbols   = [h.symbol for h in request.holdings]
     units_map = {h.symbol: h.units for h in request.holdings}
 
-    risk_free_rate = request.risk_free_rate if request.risk_free_rate is not None else RISK_FREE_RATE
-    if risk_free_rate > 1.0:
-        risk_free_rate = risk_free_rate / 100.0
-    lookback = request.lookback or DEFAULT_LOOKBACK_PERIOD
-    n_simulations = request.n_simulations
+    # Normalise Rf: always store as decimal
+    rf = request.risk_free_rate if request.risk_free_rate is not None else RISK_FREE_RATE
+    if rf > 1.0:
+        rf /= 100.0
+    lookback     = request.lookback or DEFAULT_LOOKBACK_PERIOD
+    n_simulations = request.n_simulations   # validated by schema (1 000 – 200 000)
 
-    # ── Step 1: Current prices & values ─────────────────────────────
+    # ── Step 1: Live prices ──────────────────────────────────────────
     try:
         prices = get_current_prices(symbols)
     except Exception as e:
@@ -121,167 +118,171 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
                    "Please verify the ticker symbols.",
         )
 
-    # Compute values and weights
+    # Build holdings from live prices (preliminary)
     holdings_detail: list[HoldingDetail] = []
     total_value = 0.0
-    for symbol in symbols:
-        value = units_map[symbol] * prices[symbol]
-        total_value += value
-        holdings_detail.append(
-            HoldingDetail(
-                symbol=symbol,
-                name=get_instrument_name(symbol),
-                units=units_map[symbol],
-                price=prices[symbol],
-                value=round(value, 2),
-                weight=0.0,
-            )
-        )
+    for sym in symbols:
+        val = units_map[sym] * prices[sym]
+        total_value += val
+        holdings_detail.append(HoldingDetail(
+            symbol=sym,
+            name=get_instrument_name(sym),
+            units=units_map[sym],
+            price=prices[sym],
+            value=round(val, 2),
+            weight=0.0,
+        ))
 
+    # Hypothetical equal-weighted portfolio if no units given
     if total_value <= 0:
-        simulated_total = 100000.0
-        allocation_per_asset = simulated_total / len(symbols)
+        alloc = 100_000.0 / len(symbols)
         total_value = 0.0
         for h in holdings_detail:
-            h.value = allocation_per_asset
-            h.units = round(allocation_per_asset / prices[h.symbol], 2) if prices.get(h.symbol) else 0
+            h.value = alloc
+            h.units = round(alloc / prices[h.symbol], 2) if prices.get(h.symbol) else 0
             total_value += h.value
 
     for h in holdings_detail:
         h.weight = round(h.value / total_value, 6)
 
-    # ── Step 2: Historical data ─────────────────────────────────────
+    # ── Step 2: Historical data ──────────────────────────────────────
     try:
-        expected_returns, cov_matrix, valid_symbols, hist_prices = get_historical_data(symbols, lookback)
+        mu, cov, valid_syms, hist_prices = get_historical_data(symbols, lookback)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch historical data: {str(e)}")
 
-    # Handle dropped symbols
-    if set(valid_symbols) != set(symbols):
-        logger.warning(
-            f"Dropped symbols due to insufficient data: "
-            f"{set(symbols) - set(valid_symbols)}"
-        )
-        holdings_detail = [h for h in holdings_detail if h.symbol in set(valid_symbols)]
-        total_value = sum(h.value for h in holdings_detail)
+    # Drop symbols with insufficient history
+    if set(valid_syms) != set(symbols):
+        dropped = set(symbols) - set(valid_syms)
+        logger.warning("Dropped symbols (insufficient data): %s", dropped)
+        holdings_detail = [h for h in holdings_detail if h.symbol in valid_syms]
+        total_value = sum(h.value for h in holdings_detail) or 1.0
         for h in holdings_detail:
-            h.weight = round(h.value / total_value, 6) if total_value > 0 else 0.0
+            h.weight = round(h.value / total_value, 6)
 
-    # Use consistent prices from historical data
-    consistent_prices = {s: hist_prices.get(s, prices.get(s, 1.0)) for s in valid_symbols}
+    # Use historical terminal prices for price consistency
+    # (weights and frontier both computed from the same price snapshot)
+    con_prices = {s: hist_prices.get(s, prices.get(s, 1.0)) for s in valid_syms}
     for h in holdings_detail:
-        if h.symbol in consistent_prices:
-            h.price = consistent_prices[h.symbol]
+        if h.symbol in con_prices:
+            h.price = con_prices[h.symbol]
             h.value = round(h.units * h.price, 2)
-    total_value = sum(h.value for h in holdings_detail)
-    if total_value <= 0:
-        total_value = 1.0
+    total_value = sum(h.value for h in holdings_detail) or 1.0
     for h in holdings_detail:
         h.weight = round(h.value / total_value, 6)
 
-    # Current weights in valid_symbols order
-    weight_map = {h.symbol: h.value for h in holdings_detail}
-    current_weights = np.array([
-        weight_map.get(s, 0.0) / total_value if total_value > 0 else 0.0
-        for s in valid_symbols
+    # Current weights aligned to valid_syms order
+    val_map = {h.symbol: h.value for h in holdings_detail}
+    cur_w   = np.array([
+        val_map.get(s, 0.0) / total_value for s in valid_syms
     ])
 
-    # Max weight constraint
-    max_weight = request.max_weight if request.max_weight is not None else 1.0
-    n_assets = len(valid_symbols)
-    min_feasible_weight = 1.0 / n_assets
-    if max_weight < min_feasible_weight:
-        max_weight = min_feasible_weight
+    # Max weight constraint with feasibility clamp
+    max_w      = request.max_weight if request.max_weight is not None else 1.0
+    n_assets   = len(valid_syms)
+    min_feas_w = 1.0 / n_assets
+    if max_w < min_feas_w:
+        max_w = min_feas_w         # clamped — warning generated below
 
     # ── Step 3: Current portfolio metrics ───────────────────────────
-    current_metrics = compute_portfolio_metrics(
-        current_weights, expected_returns, cov_matrix, risk_free_rate, valid_symbols
-    )
-    current_metrics["units"] = {s: units_map.get(s, 0.0) for s in valid_symbols}
+    cur_metrics = compute_portfolio_metrics(cur_w, mu, cov, rf, valid_syms)
+    cur_metrics["units"] = {s: units_map.get(s, 0.0) for s in valid_syms}
 
-    # ── Step 4: Run Monte Carlo simulation ──────────────────────────
-    mc_results = run_monte_carlo_simulation(
-        expected_returns=expected_returns,
-        cov_matrix=cov_matrix,
-        symbols=valid_symbols,
-        risk_free_rate=risk_free_rate,
-        n_simulations=n_simulations,
-        max_weight=max_weight,
+    # ── Steps 4 & 5: MC exploration → SLSQP refinement + frontier ───
+    results = run_optimization(
+        mu=mu,
+        cov=cov,
+        symbols=valid_syms,
+        rf=rf,
+        max_w=max_w,
+        n_mc=n_simulations,
         n_frontier_points=50,
+        n_slsqp_seeds=10,
     )
 
-    # Deep-copy before mutation so the original dicts inside mc_results
-    # are never aliased — prevents sharpe_ratio corruption.
-    optimal_metrics  = copy.deepcopy(mc_results["optimal_sharpe"])
-    min_vol_metrics  = copy.deepcopy(mc_results["min_volatility"])
+    # Deep-copy before mutation to prevent aliasing of sharpe_ratio
+    opt_metrics    = copy.deepcopy(results["optimal_sharpe"])
+    minvol_metrics = copy.deepcopy(results["min_volatility"])
 
-    # Compute suggested units for optimized portfolios
-    optimal_metrics["units"] = {
-        s: round((optimal_metrics["weights"][s] * total_value) / consistent_prices[s])
-        if consistent_prices.get(s, 0) > 0 else 0
-        for s in valid_symbols
-    }
-    min_vol_metrics["units"] = {
-        s: round((min_vol_metrics["weights"][s] * total_value) / consistent_prices[s])
-        if consistent_prices.get(s, 0) > 0 else 0
-        for s in valid_symbols
-    }
+    # Attach suggested units
+    for metrics in (opt_metrics, minvol_metrics):
+        metrics["units"] = {
+            s: round(metrics["weights"][s] * total_value / con_prices[s])
+            if con_prices.get(s, 0) > 0 else 0
+            for s in valid_syms
+        }
 
-    # ── Step 5: Generate warnings ───────────────────────────────────
+    # ── Step 6: Warnings ────────────────────────────────────────────
     warnings: list[str] = []
 
-    all_negative = all(
-        (er - risk_free_rate) / np.sqrt(cov_matrix[i][i]) < 0
-        for i, er in enumerate(expected_returns)
-        if np.sqrt(cov_matrix[i][i]) > 1e-10
-    )
-    if all_negative:
+    # All assets underperform Rf
+    asset_sharpes = [
+        (mu[i] - rf) / np.sqrt(max(cov[i, i], 1e-16))
+        for i in range(n_assets)
+    ]
+    if all(s < 0 for s in asset_sharpes):
         warnings.append(
-            f"⚠ ALL {n_assets} ASSETS UNDERPERFORM THE RISK-FREE RATE ({risk_free_rate*100:.1f}%). "
-            "No portfolio combination can achieve a positive Sharpe ratio. "
-            "The simulator picks the 'least bad' allocation. Consider diversifying "
-            "into other sectors or adjusting the lookback period."
+            f"⚠ ALL {n_assets} ASSETS UNDERPERFORM RF ({rf*100:.1f}%). "
+            "No allocation can achieve a positive Sharpe ratio with this asset set. "
+            "Consider broadening the universe or extending the lookback period."
         )
 
-    if optimal_metrics["sharpe_ratio"] < 0:
+    # Optimal Sharpe still negative
+    if opt_metrics["sharpe_ratio"] < 0:
         warnings.append(
-            f"⚠ OPTIMAL SHARPE IS NEGATIVE ({optimal_metrics['sharpe_ratio']:.3f}). "
-            "The recommended portfolio still underperforms the risk-free rate. "
-            "This is the median of the top 10% simulations — the best robust allocation "
-            "given these assets' recent performance."
+            f"⚠ OPTIMAL SHARPE IS NEGATIVE ({opt_metrics['sharpe_ratio']:.3f}). "
+            "This is the best achievable allocation — not a bug. "
+            "The MC-seeded SLSQP has found the least-bad risk-adjusted portfolio."
         )
 
-    max_single_weight = max(optimal_metrics["weights"].values())
-    if max_single_weight > 0.95 and n_assets >= 3:
-        dominant = max(optimal_metrics["weights"], key=optimal_metrics["weights"].get)
+    # Corner solution (single dominant asset)
+    max_wt = max(opt_metrics["weights"].values())
+    if max_wt > 0.95 and n_assets >= 3:
+        dom = max(opt_metrics["weights"], key=opt_metrics["weights"].get)
         warnings.append(
-            f"⚠ CORNER SOLUTION: {dominant.replace('.NS','')} at {max_single_weight*100:.0f}% allocation. "
-            f"Lower the MAX ALLOC constraint (currently {max_weight*100:.0f}%) to force diversification."
+            f"⚠ CORNER SOLUTION: {dom.replace('.NS','')} dominates at "
+            f"{max_wt*100:.0f}%. Lower MAX ALLOC below {max_wt*100:.0f}% "
+            "to force diversification."
         )
 
-    requested_max = request.max_weight if request.max_weight is not None else 1.0
-    if requested_max < min_feasible_weight:
+    # Max-weight clamp
+    req_max = request.max_weight if request.max_weight is not None else 1.0
+    if req_max < min_feas_w:
         warnings.append(
-            f"⚠ MAX ALLOC {requested_max*100:.0f}% is infeasible with {n_assets} assets "
-            f"(minimum is {min_feasible_weight*100:.1f}%). Clamped to {max_weight*100:.1f}%."
+            f"⚠ MAX ALLOC {req_max*100:.0f}% is infeasible with {n_assets} assets "
+            f"(minimum is {min_feas_w*100:.1f}%). Clamped to {max_w*100:.1f}%."
         )
 
-    stats = mc_results["simulation_stats"]
+    # SLSQP improvement over best MC sample
+    stats = results["simulation_stats"]
+    if "slsqp_gain" in stats and stats["slsqp_gain"] > 0.01:
+        warnings.append(
+            f"ℹ SLSQP improved on best MC sample by +{stats['slsqp_gain']:.3f} Sharpe. "
+            "MC seeding was essential — pure Monte Carlo would have missed this."
+        )
 
-    # ── Step 6: Return response ─────────────────────────────────────
+    # ── Return ───────────────────────────────────────────────────────
     return AnalyzeResponse(
         holdings=holdings_detail,
         total_value=round(total_value, 2),
-        current_portfolio=current_metrics,
-        optimal_sharpe=optimal_metrics,
-        min_volatility=min_vol_metrics,
-        efficient_frontier=mc_results["efficient_frontier"],
-        monte_carlo=mc_results["monte_carlo_cloud"],
-        simulation_stats=SimulationStats(**stats),
+        current_portfolio=cur_metrics,
+        optimal_sharpe=opt_metrics,
+        min_volatility=minvol_metrics,
+        efficient_frontier=results["efficient_frontier"],
+        monte_carlo=results["monte_carlo_cloud"],
+        simulation_stats=SimulationStats(
+            n_simulations=stats["n_simulations"],
+            top_percentile=int(stats.get("top_percentile", 0)) or 1,
+            selection_method=stats["selection_method"],
+            best_sharpe=stats.get("best_mc_sharpe", 0.0),
+            median_sharpe=stats.get("final_sharpe", 0.0),
+            worst_sharpe=stats.get("worst_mc_sharpe", 0.0),
+            cloud_size=stats["cloud_size"],
+        ),
         lookback=lookback,
-        risk_free_rate=risk_free_rate,
-        effective_max_weight=max_weight,
+        risk_free_rate=rf,
+        effective_max_weight=max_w,
         warnings=warnings,
     )

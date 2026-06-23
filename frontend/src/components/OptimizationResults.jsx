@@ -34,16 +34,14 @@ const OptimizationResults = ({ results }) => {
           fontSize: '0.7rem',
           color: 'var(--text-secondary)',
         }}>
-          <span>⚙ MC ENGINE</span>
-          <span style={{ color: 'var(--accent)' }}>{simulation_stats.n_simulations.toLocaleString()} SIMULATIONS</span>
+          <span>⛙ ENGINE</span>
+          <span style={{ color: 'var(--accent)' }}>{simulation_stats.n_simulations.toLocaleString()} MC SIMULATIONS</span>
           <span>·</span>
-          <span>TOP {simulation_stats.top_percentile}% → MEDIAN SELECTION</span>
+          <span>TOP SEEDS → SLSQP REFINE</span>
           <span>·</span>
-          <span>BEST SHARPE: <span style={{ color: 'var(--success)' }}>{fmtSharpe(simulation_stats.best_sharpe)}</span></span>
+          <span>BEST MC: <span style={{ color: '#aaa' }}>{fmtSharpe(simulation_stats.best_sharpe)}</span></span>
           <span>·</span>
-          <span>SELECTED: <span style={{ color: 'var(--accent)' }}>{fmtSharpe(simulation_stats.median_sharpe)}</span></span>
-          <span>·</span>
-          <span>WORST: <span style={{ color: 'var(--danger)' }}>{fmtSharpe(simulation_stats.worst_sharpe)}</span></span>
+          <span>SLSQP FINAL: <span style={{ color: 'var(--success)' }}>{fmtSharpe(simulation_stats.median_sharpe)}</span></span>
         </div>
       )}
 

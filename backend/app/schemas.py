@@ -81,14 +81,14 @@ class MonteCarloPoint(BaseModel):
 # ── Simulation Stats ───────────────────────────────────────────────
 
 class SimulationStats(BaseModel):
-    """Metadata about the Monte Carlo simulation run."""
-    n_simulations: int
-    top_percentile: int
-    selection_method: str
-    best_sharpe: float
-    median_sharpe: float
-    worst_sharpe: float
-    cloud_size: int
+    """Metadata about the MC-seeded SLSQP optimization run."""
+    n_simulations: int = Field(..., description="Number of MC samples generated")
+    top_percentile: int = Field(..., description="Fraction of top MC samples used as SLSQP seeds (as %)") 
+    selection_method: str = Field(..., description="Selection method: mc_seeded_slsqp")
+    best_sharpe: float = Field(..., description="Best Sharpe ratio found by Monte Carlo sampling")
+    median_sharpe: float = Field(..., description="Final Sharpe ratio after SLSQP refinement (the true optimal)")
+    worst_sharpe: float = Field(..., description="Worst Sharpe ratio across MC cloud")
+    cloud_size: int = Field(..., description="Number of MC points returned for visualization")
 
 
 # ── Price Info ──────────────────────────────────────────────────────
