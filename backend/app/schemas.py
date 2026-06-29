@@ -43,8 +43,8 @@ class AnalyzeRequest(BaseModel):
         description="Override default risk-free rate (decimal, e.g., 0.068 for 6.8%)"
     )
     max_weight: Optional[float] = Field(
-        default=1.0,
-        description="Maximum allowed weight for any single asset (e.g. 0.4 for 40%)"
+        default=0.40,
+        description="Maximum allowed weight for any single asset (e.g. 0.4 for 40%). Default 40% forces diversification."
     )
     n_simulations: int = Field(
         default=50000,

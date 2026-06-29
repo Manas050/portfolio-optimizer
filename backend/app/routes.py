@@ -180,7 +180,7 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
     ])
 
     # Max weight constraint with feasibility clamp
-    max_w      = request.max_weight if request.max_weight is not None else 1.0
+    max_w      = request.max_weight if request.max_weight is not None else 0.40
     n_assets   = len(valid_syms)
     min_feas_w = 1.0 / n_assets
     if max_w < min_feas_w:

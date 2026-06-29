@@ -10,7 +10,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [riskFreeRate, setRiskFreeRate] = useState(0.068);
-  const [maxWeight, setMaxWeight] = useState(1.0);
+  const [maxWeight, setMaxWeight] = useState(0.40);
 
   const handleOptimize = async (currentHoldings) => {
     setLoading(true);

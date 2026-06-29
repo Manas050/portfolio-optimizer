@@ -105,13 +105,18 @@ def _best_slsqp(objective, starts: list[np.ndarray],
     """
     Run SLSQP from every starting point; return (best_x, best_fun).
 
-    FIX: we no longer require res.success == True. SLSQP can return
-    exit code 9 ("iteration limit") with an excellent result when
-    tolerances are very tight. We accept any result whose constraint
-    violation is small (|Σw − 1| < 1e-4) and whose objective is
-    finite. This prevents silently falling back to equal-weight when
-    a near-perfect solution exists.
+    Accepts near-converged results (|Σw − 1| < 1e-4) so iteration-limit
+    exits don't silently discard valid solutions.
+
+    FIX: clips result to [0, upper_bound] (not just [0, ∞]) before
+    renormalising so renormalisation can never push any weight above the
+    bound that was passed to SLSQP.  Previously clip(0) / sum() could
+    raise the dominant weight above 1.0 when other weights were clipped
+    from tiny negatives.
     """
+    # Derive per-asset upper bound from bounds list (all assets equal)
+    upper = float(bounds[0][1]) if bounds else 1.0
+
     best_x, best_fun = None, np.inf
 
     for w0 in starts:
@@ -127,12 +132,14 @@ def _best_slsqp(objective, starts: list[np.ndarray],
             logger.debug("SLSQP failed from start: %s", e)
             continue
 
-        # Accept if converged OR near-converged with small constraint violation
         feasible = abs(res.x.sum() - 1.0) < 1e-4 and np.all(res.x >= -1e-6)
         if feasible and np.isfinite(res.fun) and res.fun < best_fun:
             best_fun = res.fun
-            best_x   = res.x.clip(0.0)          # clip tiny negatives from float noise
-            best_x   /= best_x.sum()             # re-normalise to exactly sum to 1
+            x = res.x.clip(0.0, upper)   # FIX: clip to [0, upper_bound]
+            s = x.sum()
+            if s > 1e-12:
+                x /= s                    # renorm — now safe, no weight exceeds upper
+            best_x = x
 
     return best_x, best_fun
 
@@ -359,7 +366,7 @@ def compute_slsqp_frontier(mu: np.ndarray,
                     and np.all(res.x >= -1e-5)
                     and np.isfinite(res.fun))
         if feasible:
-            cur_w = res.x.clip(0.0)
+            cur_w = res.x.clip(0.0, cap)    # FIX: clip to [0, cap] not just [0, ∞]
             cur_w /= cur_w.sum()
             raw.append({
                 "expected_return": round(portfolio_return(cur_w, mu), 6),
