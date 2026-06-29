@@ -5,6 +5,14 @@
 const rawApiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const API_BASE = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`;
 
+// ── Module-level in-memory caches ────────────────────────────────────
+// Sectors never change during a session — cache indefinitely
+let _sectorsCache = null;
+
+// Search results: cache per query for 60 s
+const _searchCache = new Map(); // query -> { ts, data }
+const SEARCH_TTL = 60_000;
+
 /**
  * Generic fetch wrapper with error handling.
  */
@@ -31,10 +39,16 @@ async function apiFetch(url, options = {}) {
 
 /**
  * Search instruments by name, symbol, or sector.
+ * Results are cached per query for 60 s to avoid hammering on every keystroke.
  */
 export async function searchInstruments(query) {
   if (!query || query.trim().length === 0) return [];
-  return apiFetch(`${API_BASE}/search?q=${encodeURIComponent(query.trim())}&limit=15`);
+  const key = query.trim().toLowerCase();
+  const cached = _searchCache.get(key);
+  if (cached && Date.now() - cached.ts < SEARCH_TTL) return cached.data;
+  const data = await apiFetch(`${API_BASE}/search?q=${encodeURIComponent(key)}&limit=20`);
+  _searchCache.set(key, { ts: Date.now(), data });
+  return data;
 }
 
 /**
@@ -46,9 +60,12 @@ export async function getPopularInstruments() {
 
 /**
  * Get instruments grouped by sector.
+ * Cached indefinitely for the session — the catalog is static.
  */
 export async function getInstrumentsBySector() {
-  return apiFetch(`${API_BASE}/instruments/sectors`);
+  if (_sectorsCache) return _sectorsCache;
+  _sectorsCache = await apiFetch(`${API_BASE}/instruments/sectors`);
+  return _sectorsCache;
 }
 
 /**
@@ -67,7 +84,7 @@ export async function fetchPrices(symbols) {
  * @param {string} lookback - Period string (e.g., "1y", "6mo")
  * @param {number|null} riskFreeRate - Override risk-free rate
  */
-export async function analyzePortfolio(holdings, lookback = '1y', riskFreeRate = null, maxWeight = 1.0, nSimulations = 50000) {
+export async function analyzePortfolio(holdings, lookback = '1y', riskFreeRate = null, maxWeight = 0.40, nSimulations = 50000) {
   const body = {
     holdings: holdings.map(h => {
       const parsed = parseFloat(h.units);

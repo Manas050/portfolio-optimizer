@@ -44,16 +44,74 @@ _history_cache = TTLCache()
 
 # ── Price Fetching ──────────────────────────────────────────────────
 
+def _batch_download_prices(symbols: list[str]) -> dict[str, dict]:
+    """
+    Download 2 days of close prices for all symbols in ONE yfinance call.
+    Returns {symbol: {"price": float, "change_pct": float|None}}.
+    Much faster than N individual yf.Ticker() calls.
+    """
+    if not symbols:
+        return {}
+    try:
+        raw = yf.download(
+            symbols,
+            period="5d",          # 5 days for change_pct (handles holidays)
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+        )
+    except Exception as e:
+        logger.error("Batch price download failed: %s", e)
+        return {}
+
+    # Extract closes — handle MultiIndex (multi-ticker) and flat (single-ticker)
+    if isinstance(raw.columns, pd.MultiIndex):
+        if "Close" in raw.columns.get_level_values(0):
+            closes = raw["Close"]
+            if isinstance(closes, pd.Series):
+                closes = closes.to_frame(name=symbols[0])
+        else:
+            closes = pd.DataFrame()
+    else:
+        if "Close" in raw.columns:
+            closes = raw[["Close"]].copy()
+            closes.columns = [symbols[0]]
+        else:
+            closes = pd.DataFrame()
+
+    if closes.empty:
+        return {}
+
+    closes = closes.ffill().dropna(how="all")
+
+    result: dict[str, dict] = {}
+    for sym in symbols:
+        col = sym if sym in closes.columns else None
+        if col is None:
+            continue
+        col_data = closes[col].dropna()
+        if col_data.empty:
+            continue
+        price = float(col_data.iloc[-1])
+        change_pct = None
+        if len(col_data) >= 2:
+            prev = float(col_data.iloc[-2])
+            if prev > 0:
+                change_pct = round(((price - prev) / prev) * 100, 2)
+        result[sym] = {"price": price, "change_pct": change_pct}
+
+    return result
+
+
 def get_current_prices(symbols: list[str]) -> dict[str, float]:
     """
-    Fetch the latest available price for each symbol.
-    Uses regularMarketPrice from yfinance fast_info, falling back to last close.
-    Results are cached for PRICE_CACHE_TTL seconds.
+    Fetch the latest price for each symbol.
+    Uses a SINGLE batch yf.download() call (not N individual calls).
+    Results cached for PRICE_CACHE_TTL seconds.
     """
     results: dict[str, float] = {}
     symbols_to_fetch: list[str] = []
 
-    # Check cache first
     for symbol in symbols:
         cached = _price_cache.get(f"price:{symbol}", PRICE_CACHE_TTL)
         if cached is not None:
@@ -61,50 +119,44 @@ def get_current_prices(symbols: list[str]) -> dict[str, float]:
         else:
             symbols_to_fetch.append(symbol)
 
-    if not symbols_to_fetch:
-        return results
-
-    # Fetch uncached prices
-    for symbol in symbols_to_fetch:
-        try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.fast_info
-            price = getattr(info, "last_price", None)
-            if price is None or price <= 0:
-                # Fallback: get last close from recent history
-                hist = ticker.history(period="5d")
-                if not hist.empty:
-                    price = float(hist["Close"].iloc[-1])
-                else:
-                    logger.warning(f"No price data for {symbol}")
-                    continue
-
-            results[symbol] = float(price)
-            _price_cache.set(f"price:{symbol}", float(price))
-        except Exception as e:
-            logger.error(f"Error fetching price for {symbol}: {e}")
-            continue
+    if symbols_to_fetch:
+        batch = _batch_download_prices(symbols_to_fetch)
+        for sym, data in batch.items():
+            price = data["price"]
+            results[sym] = price
+            _price_cache.set(f"price:{sym}", price)
+            # Opportunistically cache change_pct too
+            if data["change_pct"] is not None:
+                _price_cache.set(f"chg:{sym}", data["change_pct"])
 
     return results
 
 
 def get_price_changes(symbols: list[str]) -> dict[str, float]:
     """
-    Get the day's percentage change for each symbol.
+    Get the day's % change for each symbol.
+    Reuses the same batch download as get_current_prices (via shared cache).
     """
     changes: dict[str, float] = {}
+    symbols_to_fetch: list[str] = []
+
     for symbol in symbols:
-        try:
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period="5d")
-            if len(hist) >= 2:
-                prev_close = float(hist["Close"].iloc[-2])
-                curr_close = float(hist["Close"].iloc[-1])
-                if prev_close > 0:
-                    changes[symbol] = ((curr_close - prev_close) / prev_close) * 100
-        except Exception as e:
-            logger.error(f"Error fetching change for {symbol}: {e}")
+        cached = _price_cache.get(f"chg:{symbol}", PRICE_CACHE_TTL)
+        if cached is not None:
+            changes[symbol] = cached
+        else:
+            symbols_to_fetch.append(symbol)
+
+    if symbols_to_fetch:
+        batch = _batch_download_prices(symbols_to_fetch)
+        for sym, data in batch.items():
+            _price_cache.set(f"price:{sym}", data["price"])
+            if data["change_pct"] is not None:
+                changes[sym] = data["change_pct"]
+                _price_cache.set(f"chg:{sym}", data["change_pct"])
+
     return changes
+
 
 
 # ── Historical Returns ──────────────────────────────────────────────

@@ -15,14 +15,14 @@ DEFAULT_LOOKBACK_PERIOD = os.getenv("DEFAULT_LOOKBACK_PERIOD", "1y")
 # Number of trading days in a year (India: ~252)
 TRADING_DAYS_PER_YEAR = 252
 
-# Cache TTL for live prices (seconds)
-PRICE_CACHE_TTL = int(os.getenv("PRICE_CACHE_TTL", "60"))
+# Cache TTL for live prices (seconds) — 2 min
+PRICE_CACHE_TTL = int(os.getenv("PRICE_CACHE_TTL", "120"))
 
-# Cache TTL for historical data (seconds)
-HISTORICAL_CACHE_TTL = int(os.getenv("HISTORICAL_CACHE_TTL", "300"))
+# Cache TTL for historical data (seconds) — 30 min
+HISTORICAL_CACHE_TTL = int(os.getenv("HISTORICAL_CACHE_TTL", "1800"))
 
 # Number of points on the efficient frontier
-FRONTIER_POINTS = 50
+FRONTIER_POINTS = 30
 
 # CORS origins (Vite dev server & Production)
 cors_env = os.getenv("CORS_ORIGINS", "*")

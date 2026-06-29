@@ -203,7 +203,7 @@ def optimise_max_sharpe(mu: np.ndarray,
                          rf: float,
                          max_w: float,
                          mc_seeds: np.ndarray | None = None,
-                         n_extra_starts: int = 5) -> np.ndarray:
+                         n_extra_starts: int = 3) -> np.ndarray:
     """
     Maximise Sharpe via MC-seeded multi-start SLSQP.
 
@@ -245,7 +245,7 @@ def optimise_min_volatility(mu: np.ndarray,
                               cov: np.ndarray,
                               max_w: float,
                               mc_seeds: np.ndarray | None = None,
-                              n_extra_starts: int = 4) -> np.ndarray:
+                              n_extra_starts: int = 2) -> np.ndarray:
     """
     Minimise portfolio variance via MC-seeded multi-start SLSQP.
 
