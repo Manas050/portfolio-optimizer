@@ -45,9 +45,9 @@ async def api_health():
 @router.get("/search", response_model=list[InstrumentInfo])
 async def api_search_instruments(
     q: str = Query(..., min_length=1, description="Search query"),
-    limit: int = Query(20, ge=1, le=50),
+    limit: int = Query(30, ge=1, le=50),
 ):
-    """Search the instrument catalog by name, symbol, or sector."""
+    """Search the instrument catalog (350+ instruments) by name, symbol, or sector."""
     return search_instruments(q, limit=limit)
 
 

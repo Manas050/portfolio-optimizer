@@ -29,8 +29,10 @@ class PortfolioHolding(BaseModel):
 class AnalyzeRequest(BaseModel):
     """Request body for portfolio analysis."""
     holdings: list[PortfolioHolding] = Field(
-        ..., min_length=2,
-        description="At least 2 holdings required for diversification analysis"
+        ...,
+        min_length=2,
+        max_length=30,
+        description="2–30 holdings required. Optimizer accuracy degrades beyond 30 assets."
     )
     lookback: str = Field(
         default="1y",
