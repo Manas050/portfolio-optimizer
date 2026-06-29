@@ -34,7 +34,7 @@ async def api_health():
     """Health check — exposes active engine version and config."""
     return {
         "status": "ok",
-        "engine": "mc-seeded-slsqp-v4",
+        "engine": "mc-seeded-slsqp-v5",
         "default_rf_pct": round(RISK_FREE_RATE * 100, 2),
         "timestamp": datetime.datetime.utcnow().isoformat(),
     }
@@ -186,9 +186,11 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
     if max_w < min_feas_w:
         max_w = min_feas_w         # clamped — warning generated below
 
-    # ── Step 3: Current portfolio metrics ───────────────────────────
+    # Current portfolio: use actual holdings units, not units_map
+    # (units_map may have 0s for hypothetical entries)
     cur_metrics = compute_portfolio_metrics(cur_w, mu, cov, rf, valid_syms)
-    cur_metrics["units"] = {s: units_map.get(s, 0.0) for s in valid_syms}
+    actual_units = {h.symbol: h.units for h in holdings_detail}
+    cur_metrics["units"] = {s: actual_units.get(s, 0.0) for s in valid_syms}
 
     # ── Steps 4 & 5: MC exploration → SLSQP refinement + frontier ───
     results = run_optimization(
@@ -207,9 +209,10 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
     minvol_metrics = copy.deepcopy(results["min_volatility"])
 
     # Attach suggested units
+    # FIX: use max(1, round(...)) so expensive stocks don't round to 0
     for metrics in (opt_metrics, minvol_metrics):
         metrics["units"] = {
-            s: round(metrics["weights"][s] * total_value / con_prices[s])
+            s: max(1, round(metrics["weights"][s] * total_value / con_prices[s]))
             if con_prices.get(s, 0) > 0 else 0
             for s in valid_syms
         }

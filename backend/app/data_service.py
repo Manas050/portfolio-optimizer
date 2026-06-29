@@ -146,12 +146,29 @@ def get_historical_data(
         raise ValueError(f"Failed to fetch historical data: {e}")
 
     # Extract closing prices
+    # yfinance returns MultiIndex columns ('Close', ticker) for multi-symbol downloads.
+    # For single-symbol downloads the structure can vary by version.
     if isinstance(data.columns, pd.MultiIndex):
-        closes = data["Close"]
+        # Multi-level: ('Price', 'Ticker') or ('Close', 'TICKER')
+        # Get the 'Close' price level
+        if "Close" in data.columns.get_level_values(0):
+            closes = data["Close"]
+            # If result is a Series (single ticker), wrap as DataFrame
+            if isinstance(closes, pd.Series):
+                closes = closes.to_frame(name=symbols[0])
+        else:
+            # Fallback: use first available price column
+            closes = data.iloc[:, :len(symbols)].copy()
+            closes.columns = symbols[:closes.shape[1]]
     else:
-        # Single ticker case
-        closes = data[["Close"]]
-        closes.columns = symbols
+        # Flat columns (single ticker downloaded with group_by=None)
+        if "Close" in data.columns:
+            closes = data[["Close"]].copy()
+            closes.columns = [symbols[0]] if len(symbols) == 1 else symbols[:1]
+        else:
+            closes = data.copy()
+            if closes.shape[1] == len(symbols):
+                closes.columns = symbols
 
     # ── NaN handling ────────────────────────────────────────────────
     # 1. Drop columns with too many NaN values (>30% missing)
