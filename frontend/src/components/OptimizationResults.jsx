@@ -8,10 +8,8 @@ const OptimizationResults = ({ results }) => {
     optimal_sharpe,
     min_volatility,
     total_value,
-    warnings,
     effective_max_weight,
     risk_free_rate,
-    simulation_stats,
   } = results;
 
   const fmtPct = (v) => `${(v * 100).toFixed(2)}%`;
@@ -20,49 +18,6 @@ const OptimizationResults = ({ results }) => {
   return (
     <div className="glass-panel">
       <div className="panel-header">[ ANLYS: PORTFOLIO METRICS ]</div>
-
-      {/* Simulation Stats Banner */}
-      {simulation_stats && (
-        <div style={{
-          display: 'flex',
-          gap: '1rem',
-          flexWrap: 'wrap',
-          marginBottom: '1rem',
-          padding: '0.5rem 0.75rem',
-          border: '1px solid #1a3a1a',
-          background: 'rgba(0,255,0,0.03)',
-          fontSize: '0.7rem',
-          color: 'var(--text-secondary)',
-        }}>
-          <span>⛙ ENGINE</span>
-          <span style={{ color: 'var(--accent)' }}>{simulation_stats.n_simulations.toLocaleString()} MC SIMULATIONS</span>
-          <span>·</span>
-          <span>TOP SEEDS → SLSQP REFINE</span>
-          <span>·</span>
-          <span>BEST MC: <span style={{ color: '#aaa' }}>{fmtSharpe(simulation_stats.best_sharpe)}</span></span>
-          <span>·</span>
-          <span>SLSQP FINAL: <span style={{ color: 'var(--success)' }}>{fmtSharpe(simulation_stats.median_sharpe)}</span></span>
-        </div>
-      )}
-
-      {/* Warnings */}
-      {warnings && warnings.length > 0 && (
-        <div style={{ marginBottom: '1rem' }}>
-          {warnings.map((w, i) => (
-            <div key={i} style={{
-              padding: '0.5rem 0.75rem',
-              border: '1px solid var(--danger)',
-              background: 'rgba(255,0,0,0.08)',
-              color: 'var(--danger)',
-              fontSize: '0.75rem',
-              marginBottom: '0.25rem',
-              lineHeight: 1.4,
-            }}>
-              {w}
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Metrics Grid */}
       <div className="results-grid">

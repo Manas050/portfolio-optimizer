@@ -217,54 +217,10 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
             for s in valid_syms
         }
 
-    # ── Step 6: Warnings ────────────────────────────────────────────
+    # No warnings surfaced to the user
     warnings: list[str] = []
 
-    # All assets underperform Rf
-    asset_sharpes = [
-        (mu[i] - rf) / np.sqrt(max(cov[i, i], 1e-16))
-        for i in range(n_assets)
-    ]
-    if all(s < 0 for s in asset_sharpes):
-        warnings.append(
-            f"⚠ ALL {n_assets} ASSETS UNDERPERFORM RF ({rf*100:.1f}%). "
-            "No allocation can achieve a positive Sharpe ratio with this asset set. "
-            "Consider broadening the universe or extending the lookback period."
-        )
-
-    # Optimal Sharpe still negative
-    if opt_metrics["sharpe_ratio"] < 0:
-        warnings.append(
-            f"⚠ OPTIMAL SHARPE IS NEGATIVE ({opt_metrics['sharpe_ratio']:.3f}). "
-            "This is the best achievable allocation — not a bug. "
-            "The MC-seeded SLSQP has found the least-bad risk-adjusted portfolio."
-        )
-
-    # Corner solution (single dominant asset)
-    max_wt = max(opt_metrics["weights"].values())
-    if max_wt > 0.95 and n_assets >= 3:
-        dom = max(opt_metrics["weights"], key=opt_metrics["weights"].get)
-        warnings.append(
-            f"⚠ CORNER SOLUTION: {dom.replace('.NS','')} dominates at "
-            f"{max_wt*100:.0f}%. Lower MAX ALLOC below {max_wt*100:.0f}% "
-            "to force diversification."
-        )
-
-    # Max-weight clamp
-    req_max = request.max_weight if request.max_weight is not None else 1.0
-    if req_max < min_feas_w:
-        warnings.append(
-            f"⚠ MAX ALLOC {req_max*100:.0f}% is infeasible with {n_assets} assets "
-            f"(minimum is {min_feas_w*100:.1f}%). Clamped to {max_w*100:.1f}%."
-        )
-
-    # SLSQP improvement over best MC sample
     stats = results["simulation_stats"]
-    if "slsqp_gain" in stats and stats["slsqp_gain"] > 0.01:
-        warnings.append(
-            f"ℹ SLSQP improved on best MC sample by +{stats['slsqp_gain']:.3f} Sharpe. "
-            "MC seeding was essential — pure Monte Carlo would have missed this."
-        )
 
     # ── Return ───────────────────────────────────────────────────────
     return AnalyzeResponse(

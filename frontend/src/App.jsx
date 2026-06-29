@@ -11,13 +11,12 @@ function App() {
   const [error, setError] = useState(null);
   const [riskFreeRate, setRiskFreeRate] = useState(0.068);
   const [maxWeight, setMaxWeight] = useState(1.0);
-  const [nSimulations, setNSimulations] = useState(50000);
 
   const handleOptimize = async (currentHoldings) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await analyzePortfolio(currentHoldings, '1y', riskFreeRate, maxWeight, nSimulations);
+      const data = await analyzePortfolio(currentHoldings, '1y', riskFreeRate, maxWeight, 50000);
       setResults(data);
     } catch (err) {
       console.error(err);
@@ -52,8 +51,6 @@ function App() {
             setRiskFreeRate={setRiskFreeRate}
             maxWeight={maxWeight}
             setMaxWeight={setMaxWeight}
-            nSimulations={nSimulations}
-            setNSimulations={setNSimulations}
           />
         </div>
         
@@ -80,7 +77,7 @@ function App() {
           ) : (
             <div className="glass-panel" style={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderStyle: 'dashed' }}>
               {loading ? (
-              <div className="loading-text">RUNNING {nSimulations.toLocaleString()} SIMULATIONS...</div>
+              <div className="loading-text">OPTIMIZING PORTFOLIO...</div>
               ) : (
                 <div style={{ color: 'var(--text-secondary)', textAlign: 'center' }}>
                   <div>[ AWAITING INPUT ]</div>
