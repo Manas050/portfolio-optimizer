@@ -106,3 +106,67 @@ export async function analyzePortfolio(holdings, lookback = '1y', riskFreeRate =
     body: JSON.stringify(body),
   });
 }
+
+/**
+ * Stream an AI research response from Gemini.
+ * Uses the Fetch API to read the SSE stream incrementally.
+ *
+ * @param {string} query - The user's question
+ * @param {object|null} portfolioContext - The full /portfolio/analyze response
+ * @param {Array<{role,text}>} history - Previous conversation turns
+ * @param {function} onChunk - Called with each text fragment as it arrives
+ * @param {function} onDone  - Called when the stream ends (no args)
+ * @param {function} onError - Called with an error string if something fails
+ * @returns {function} abort - Call to cancel the stream
+ */
+export function streamResearch(query, portfolioContext, history, onChunk, onDone, onError) {
+  const controller = new AbortController();
+
+  (async () => {
+    try {
+      const resp = await fetch(`${API_BASE}/research`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          portfolio_context: portfolioContext || null,
+          history: history || [],
+        }),
+        signal: controller.signal,
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        onError(err.detail || `HTTP ${resp.status}`);
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE lines end with \n\n; process all complete events
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop(); // keep any incomplete tail
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6); // strip "data: "
+          if (payload === '[DONE]') { onDone(); return; }
+          // Unescape \n back to newlines
+          onChunk(payload.replace(/\\n/g, '\n'));
+        }
+      }
+      onDone();
+    } catch (err) {
+      if (err.name !== 'AbortError') onError(err.message);
+    }
+  })();
+
+  return () => controller.abort();
+}

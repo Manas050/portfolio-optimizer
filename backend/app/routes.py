@@ -5,7 +5,10 @@ API route definitions for the portfolio optimizer.
 import logging
 import copy
 import datetime
+from typing import Any
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from app.config import RISK_FREE_RATE, DEFAULT_LOOKBACK_PERIOD
 from app.schemas import (
@@ -20,11 +23,24 @@ from app.schemas import (
 from app.instruments import search_instruments, get_popular_instruments, get_instrument_name, get_instruments_by_sector
 from app.data_service import get_current_prices, get_price_changes, get_historical_data
 from app.optimizer import compute_portfolio_metrics, run_optimization
+from app.ai_service import stream_research
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
+
+
+# ── Pydantic models for AI research ────────────────────────────────
+
+class ConversationTurn(BaseModel):
+    role: str          # "user" | "assistant"
+    text: str
+
+class ResearchRequest(BaseModel):
+    query: str
+    portfolio_context: dict[str, Any] | None = None
+    history: list[ConversationTurn] | None = None
 
 
 # ── Health ──────────────────────────────────────────────────────────
@@ -244,4 +260,37 @@ async def api_analyze_portfolio(request: AnalyzeRequest):
         risk_free_rate=rf,
         effective_max_weight=max_w,
         warnings=warnings,
+    )
+
+
+# ── AI Research ─────────────────────────────────────────────────────
+
+@router.post("/research")
+async def api_research(request: ResearchRequest):
+    """
+    Stream a Gemini AI response for a portfolio research query.
+
+    Returns Server-Sent Events (text/event-stream):
+      data: <text chunk>\\n\\n   (repeated)
+      data: [DONE]\\n\\n          (terminal frame)
+
+    The portfolio_context field accepts the full /portfolio/analyze
+    response so Gemini is aware of the user's holdings and optimizer results.
+    """
+    history_dicts = (
+        [{"role": t.role, "text": t.text} for t in request.history]
+        if request.history else None
+    )
+
+    return StreamingResponse(
+        stream_research(
+            query=request.query,
+            portfolio_context=request.portfolio_context,
+            history=history_dicts,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # disable nginx buffering for SSE
+        },
     )

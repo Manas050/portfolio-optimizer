@@ -320,3 +320,9 @@ input:focus {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--accent);
 }
+
+/* AI streaming cursor */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
