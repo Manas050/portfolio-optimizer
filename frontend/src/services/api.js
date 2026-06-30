@@ -2,8 +2,10 @@
  * API client for the Portfolio Optimizer backend.
  */
 
-const rawApiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const API_BASE = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`;
+const rawApiUrl = import.meta.env.VITE_API_URL || '';
+const API_BASE = rawApiUrl
+  ? (rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`)
+  : '/api';   // dev: Vite proxy forwards /api → localhost:8000/api
 
 // ── Module-level in-memory caches ────────────────────────────────────
 // Sectors never change during a session — cache indefinitely
